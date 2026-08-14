@@ -1,4 +1,6 @@
 from decimal import Decimal
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
 from supplier_price_watch import (
@@ -7,6 +9,7 @@ from supplier_price_watch import (
     SupplierQuote,
     compare_catalogs,
     compare_quote,
+    load_quotes_csv,
 )
 
 
@@ -42,6 +45,61 @@ class SupplierQuoteTests(unittest.TestCase):
                     "currency": "TL",
                 }
             )
+
+
+class CsvLoaderTests(unittest.TestCase):
+    def write_csv(self, content: str) -> Path:
+        temp_dir = TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        path = Path(temp_dir.name) / "quotes.csv"
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def test_loads_valid_rows_and_defaults_currency(self):
+        path = self.write_csv(
+            "supplier,sku,unit_cost,currency\n"
+            "Arzu,SKU-1,100.125,try\n"
+            "MSR,SKU-2,55.5,\n"
+        )
+
+        quotes = load_quotes_csv(path)
+
+        self.assertEqual(len(quotes), 2)
+        self.assertEqual(quotes[0].unit_cost, Decimal("100.13"))
+        self.assertEqual(quotes[0].currency, "TRY")
+        self.assertEqual(quotes[1].currency, "TRY")
+
+    def test_missing_required_column_is_rejected(self):
+        path = self.write_csv("supplier,sku,currency\nArzu,SKU-1,TRY\n")
+
+        with self.assertRaisesRegex(PriceWatchError, "unit_cost"):
+            load_quotes_csv(path)
+
+    def test_invalid_row_reports_line_number(self):
+        path = self.write_csv(
+            "supplier,sku,unit_cost,currency\nArzu,SKU-1,not-a-number,TRY\n"
+        )
+
+        with self.assertRaisesRegex(PriceWatchError, r"CSV row 2: unit_cost"):
+            load_quotes_csv(path)
+
+    def test_duplicate_identity_is_rejected(self):
+        path = self.write_csv(
+            "supplier,sku,unit_cost,currency\n"
+            "Arzu,SKU-1,100,TRY\n"
+            "Arzu,SKU-1,110,TRY\n"
+        )
+
+        with self.assertRaisesRegex(PriceWatchError, "duplicate supplier/SKU/currency"):
+            load_quotes_csv(path)
+
+    def test_extra_values_are_rejected(self):
+        path = self.write_csv(
+            "supplier,sku,unit_cost,currency\nArzu,SKU-1,100,TRY,unexpected\n"
+        )
+
+        with self.assertRaisesRegex(PriceWatchError, "more values than headers"):
+            load_quotes_csv(path)
 
 
 class PriceComparisonTests(unittest.TestCase):

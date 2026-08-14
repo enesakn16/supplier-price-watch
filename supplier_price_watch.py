@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from enum import Enum
+from pathlib import Path
 from typing import Iterable, Mapping
 
 MONEY_QUANTUM = Decimal("0.01")
 PERCENT_QUANTUM = Decimal("0.01")
 ZERO = Decimal("0")
 HUNDRED = Decimal("100")
+REQUIRED_CSV_COLUMNS = frozenset({"supplier", "sku", "unit_cost"})
 
 
 class PriceWatchError(ValueError):
@@ -62,6 +65,61 @@ class SupplierQuote:
             unit_cost=_money(row.get("unit_cost"), field="unit_cost"),
             currency=currency,
         )
+
+
+def load_quotes_csv(path: str | Path) -> list[SupplierQuote]:
+    """Load a supplier quote CSV with strict schema and duplicate validation.
+
+    Required columns are ``supplier``, ``sku`` and ``unit_cost``. ``currency`` is
+    optional and defaults to TRY. UTF-8 BOM files are accepted. Rows are never
+    guessed or silently merged: duplicate supplier/SKU/currency identities fail.
+    """
+
+    csv_path = Path(path)
+    try:
+        handle = csv_path.open("r", encoding="utf-8-sig", newline="")
+    except OSError as exc:
+        raise PriceWatchError(f"cannot read CSV: {csv_path}") from exc
+
+    with handle:
+        reader = csv.DictReader(handle)
+        if reader.fieldnames is None:
+            raise PriceWatchError("CSV header is required")
+
+        headers = [name.strip() if name is not None else "" for name in reader.fieldnames]
+        if any(not name for name in headers):
+            raise PriceWatchError("CSV contains an empty column name")
+        if len(headers) != len(set(headers)):
+            raise PriceWatchError("CSV contains duplicate column names")
+
+        missing = sorted(REQUIRED_CSV_COLUMNS.difference(headers))
+        if missing:
+            raise PriceWatchError(f"CSV missing required columns: {', '.join(missing)}")
+
+        quotes: list[SupplierQuote] = []
+        seen: set[tuple[str, str, str]] = set()
+        for line_number, raw_row in enumerate(reader, start=2):
+            if None in raw_row:
+                raise PriceWatchError(f"CSV row {line_number} has more values than headers")
+
+            row = {str(key).strip(): value for key, value in raw_row.items()}
+            if all(value is None or not str(value).strip() for value in row.values()):
+                continue
+
+            try:
+                quote = SupplierQuote.from_mapping(row)
+            except PriceWatchError as exc:
+                raise PriceWatchError(f"CSV row {line_number}: {exc}") from exc
+
+            identity = (quote.supplier, quote.sku, quote.currency)
+            if identity in seen:
+                raise PriceWatchError(
+                    f"CSV row {line_number}: duplicate supplier/SKU/currency identity"
+                )
+            seen.add(identity)
+            quotes.append(quote)
+
+        return quotes
 
 
 @dataclass(frozen=True, slots=True)
