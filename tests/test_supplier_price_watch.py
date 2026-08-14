@@ -69,6 +69,56 @@ class CsvLoaderTests(unittest.TestCase):
         self.assertEqual(quotes[0].currency, "TRY")
         self.assertEqual(quotes[1].currency, "TRY")
 
+    def test_supplier_specific_headers_can_be_mapped_explicitly(self):
+        path = self.write_csv(
+            "Tedarikci,Urun Kodu,Alis Fiyati,Para Birimi\n"
+            "Arzu,8690001,123.45,try\n"
+        )
+
+        quotes = load_quotes_csv(
+            path,
+            column_map={
+                "Tedarikci": "supplier",
+                "Urun Kodu": "sku",
+                "Alis Fiyati": "unit_cost",
+                "Para Birimi": "currency",
+            },
+        )
+
+        self.assertEqual(len(quotes), 1)
+        self.assertEqual(quotes[0].supplier, "Arzu")
+        self.assertEqual(quotes[0].sku, "8690001")
+        self.assertEqual(quotes[0].unit_cost, Decimal("123.45"))
+        self.assertEqual(quotes[0].currency, "TRY")
+
+    def test_column_map_missing_source_is_rejected(self):
+        path = self.write_csv("Tedarikci,Urun Kodu,Fiyat\nArzu,SKU-1,100\n")
+
+        with self.assertRaisesRegex(PriceWatchError, "references missing columns: Doviz"):
+            load_quotes_csv(
+                path,
+                column_map={
+                    "Tedarikci": "supplier",
+                    "Urun Kodu": "sku",
+                    "Fiyat": "unit_cost",
+                    "Doviz": "currency",
+                },
+            )
+
+    def test_column_map_cannot_create_duplicate_canonical_columns(self):
+        path = self.write_csv(
+            "supplier,Tedarikci,sku,unit_cost\nArzu,Arzu,SKU-1,100\n"
+        )
+
+        with self.assertRaisesRegex(PriceWatchError, "duplicate canonical columns"):
+            load_quotes_csv(path, column_map={"Tedarikci": "supplier"})
+
+    def test_column_map_target_must_be_supported(self):
+        path = self.write_csv("supplier,sku,unit_cost\nArzu,SKU-1,100\n")
+
+        with self.assertRaisesRegex(PriceWatchError, "target is not supported"):
+            load_quotes_csv(path, column_map={"supplier": "vendor"})
+
     def test_missing_required_column_is_rejected(self):
         path = self.write_csv("supplier,sku,currency\nArzu,SKU-1,TRY\n")
 

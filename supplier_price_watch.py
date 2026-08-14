@@ -12,6 +12,7 @@ PERCENT_QUANTUM = Decimal("0.01")
 ZERO = Decimal("0")
 HUNDRED = Decimal("100")
 REQUIRED_CSV_COLUMNS = frozenset({"supplier", "sku", "unit_cost"})
+CANONICAL_CSV_COLUMNS = REQUIRED_CSV_COLUMNS | {"currency"}
 
 
 class PriceWatchError(ValueError):
@@ -67,12 +68,39 @@ class SupplierQuote:
         )
 
 
-def load_quotes_csv(path: str | Path) -> list[SupplierQuote]:
+def _normalize_column_map(column_map: Mapping[str, str] | None) -> dict[str, str]:
+    if column_map is None:
+        return {}
+
+    normalized: dict[str, str] = {}
+    targets: set[str] = set()
+    for raw_source, raw_target in column_map.items():
+        source = str(raw_source).strip()
+        target = str(raw_target).strip()
+        if not source or not target:
+            raise PriceWatchError("CSV column map names cannot be empty")
+        if source in normalized:
+            raise PriceWatchError(f"CSV column map contains duplicate source: {source}")
+        if target not in CANONICAL_CSV_COLUMNS:
+            raise PriceWatchError(f"CSV column map target is not supported: {target}")
+        if target in targets:
+            raise PriceWatchError(f"CSV column map maps multiple columns to: {target}")
+        normalized[source] = target
+        targets.add(target)
+    return normalized
+
+
+def load_quotes_csv(
+    path: str | Path,
+    *,
+    column_map: Mapping[str, str] | None = None,
+) -> list[SupplierQuote]:
     """Load a supplier quote CSV with strict schema and duplicate validation.
 
-    Required columns are ``supplier``, ``sku`` and ``unit_cost``. ``currency`` is
-    optional and defaults to TRY. UTF-8 BOM files are accepted. Rows are never
-    guessed or silently merged: duplicate supplier/SKU/currency identities fail.
+    Required canonical columns are ``supplier``, ``sku`` and ``unit_cost``.
+    ``currency`` is optional and defaults to TRY. Supplier-specific headers can be
+    mapped explicitly with ``column_map={"source header": "canonical_name"}``.
+    Header guessing is intentionally forbidden.
     """
 
     csv_path = Path(path)
@@ -80,6 +108,8 @@ def load_quotes_csv(path: str | Path) -> list[SupplierQuote]:
         handle = csv_path.open("r", encoding="utf-8-sig", newline="")
     except OSError as exc:
         raise PriceWatchError(f"cannot read CSV: {csv_path}") from exc
+
+    mapping = _normalize_column_map(column_map)
 
     with handle:
         reader = csv.DictReader(handle)
@@ -92,7 +122,17 @@ def load_quotes_csv(path: str | Path) -> list[SupplierQuote]:
         if len(headers) != len(set(headers)):
             raise PriceWatchError("CSV contains duplicate column names")
 
-        missing = sorted(REQUIRED_CSV_COLUMNS.difference(headers))
+        missing_sources = sorted(set(mapping).difference(headers))
+        if missing_sources:
+            raise PriceWatchError(
+                f"CSV column map references missing columns: {', '.join(missing_sources)}"
+            )
+
+        canonical_headers = [mapping.get(name, name) for name in headers]
+        if len(canonical_headers) != len(set(canonical_headers)):
+            raise PriceWatchError("CSV column map creates duplicate canonical columns")
+
+        missing = sorted(REQUIRED_CSV_COLUMNS.difference(canonical_headers))
         if missing:
             raise PriceWatchError(f"CSV missing required columns: {', '.join(missing)}")
 
@@ -102,7 +142,10 @@ def load_quotes_csv(path: str | Path) -> list[SupplierQuote]:
             if None in raw_row:
                 raise PriceWatchError(f"CSV row {line_number} has more values than headers")
 
-            row = {str(key).strip(): value for key, value in raw_row.items()}
+            row = {
+                mapping.get(str(key).strip(), str(key).strip()): value
+                for key, value in raw_row.items()
+            }
             if all(value is None or not str(value).strip() for value in row.values()):
                 continue
 
