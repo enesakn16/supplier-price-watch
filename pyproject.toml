@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "supplier-price-watch"
+version = "0.1.0"
+description = "Compare supplier price lists, detect cost changes, and surface margin risk safely."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "openpyxl>=3.1,<4",
+]
+
+[tool.setuptools]
+py-modules = ["supplier_price_watch"]
