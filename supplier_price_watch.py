@@ -7,6 +7,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Iterable, Mapping
 
+from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
+
 MONEY_QUANTUM = Decimal("0.01")
 PERCENT_QUANTUM = Decimal("0.01")
 ZERO = Decimal("0")
@@ -78,13 +81,13 @@ def _normalize_column_map(column_map: Mapping[str, str] | None) -> dict[str, str
         source = str(raw_source).strip()
         target = str(raw_target).strip()
         if not source or not target:
-            raise PriceWatchError("CSV column map names cannot be empty")
+            raise PriceWatchError("column map names cannot be empty")
         if source in normalized:
-            raise PriceWatchError(f"CSV column map contains duplicate source: {source}")
+            raise PriceWatchError(f"column map contains duplicate source: {source}")
         if target not in CANONICAL_CSV_COLUMNS:
-            raise PriceWatchError(f"CSV column map target is not supported: {target}")
+            raise PriceWatchError(f"column map target is not supported: {target}")
         if target in targets:
-            raise PriceWatchError(f"CSV column map maps multiple columns to: {target}")
+            raise PriceWatchError(f"column map maps multiple columns to: {target}")
         normalized[source] = target
         targets.add(target)
     return normalized
@@ -163,6 +166,105 @@ def load_quotes_csv(
             quotes.append(quote)
 
         return quotes
+
+
+def load_quotes_xlsx(
+    path: str | Path,
+    *,
+    column_map: Mapping[str, str] | None = None,
+    sheet_name: str | None = None,
+) -> list[SupplierQuote]:
+    """Load one XLSX worksheet using the same explicit schema rules as CSV.
+
+    The workbook is opened in read-only/data-only mode. When ``sheet_name`` is
+    omitted, the active worksheet is used. Formula cells are never evaluated by
+    this loader; callers must provide workbooks with cached values or plain data.
+    """
+
+    xlsx_path = Path(path)
+    try:
+        workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
+    except (OSError, InvalidFileException, ValueError) as exc:
+        raise PriceWatchError(f"cannot read XLSX: {xlsx_path}") from exc
+
+    mapping = _normalize_column_map(column_map)
+
+    try:
+        if sheet_name is None:
+            worksheet = workbook.active
+        else:
+            if sheet_name not in workbook.sheetnames:
+                raise PriceWatchError(f"XLSX worksheet not found: {sheet_name}")
+            worksheet = workbook[sheet_name]
+
+        rows = worksheet.iter_rows(values_only=True)
+        try:
+            raw_headers = next(rows)
+        except StopIteration as exc:
+            raise PriceWatchError("XLSX header is required") from exc
+
+        headers = ["" if value is None else str(value).strip() for value in raw_headers]
+        while headers and not headers[-1]:
+            headers.pop()
+
+        if not headers:
+            raise PriceWatchError("XLSX header is required")
+        if any(not name for name in headers):
+            raise PriceWatchError("XLSX contains an empty column name")
+        if len(headers) != len(set(headers)):
+            raise PriceWatchError("XLSX contains duplicate column names")
+
+        missing_sources = sorted(set(mapping).difference(headers))
+        if missing_sources:
+            raise PriceWatchError(
+                f"XLSX column map references missing columns: {', '.join(missing_sources)}"
+            )
+
+        canonical_headers = [mapping.get(name, name) for name in headers]
+        if len(canonical_headers) != len(set(canonical_headers)):
+            raise PriceWatchError("XLSX column map creates duplicate canonical columns")
+
+        missing = sorted(REQUIRED_CSV_COLUMNS.difference(canonical_headers))
+        if missing:
+            raise PriceWatchError(f"XLSX missing required columns: {', '.join(missing)}")
+
+        quotes: list[SupplierQuote] = []
+        seen: set[tuple[str, str, str]] = set()
+        width = len(headers)
+
+        for row_number, values in enumerate(rows, start=2):
+            materialized = list(values)
+            extra_values = materialized[width:]
+            if any(value is not None and str(value).strip() for value in extra_values):
+                raise PriceWatchError(f"XLSX row {row_number} has more values than headers")
+
+            materialized = materialized[:width]
+            if len(materialized) < width:
+                materialized.extend([None] * (width - len(materialized)))
+
+            if all(value is None or not str(value).strip() for value in materialized):
+                continue
+
+            row = {
+                mapping.get(header, header): value
+                for header, value in zip(headers, materialized, strict=True)
+            }
+            try:
+                quote = SupplierQuote.from_mapping(row)
+            except PriceWatchError as exc:
+                raise PriceWatchError(f"XLSX row {row_number}: {exc}") from exc
+
+            identity = (quote.supplier, quote.sku, quote.currency)
+            if identity in seen:
+                raise PriceWatchError(
+                    f"XLSX row {row_number}: duplicate supplier/SKU/currency identity"
+                )
+            seen.add(identity)
+            quotes.append(quote)
+
+        return quotes
+    finally:
+        workbook.close()
 
 
 @dataclass(frozen=True, slots=True)
