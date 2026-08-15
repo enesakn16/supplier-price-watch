@@ -3,6 +3,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
+from openpyxl import Workbook
+
 from supplier_price_watch import (
     PriceWatchError,
     RiskLevel,
@@ -10,6 +12,7 @@ from supplier_price_watch import (
     compare_catalogs,
     compare_quote,
     load_quotes_csv,
+    load_quotes_xlsx,
 )
 
 
@@ -150,6 +153,100 @@ class CsvLoaderTests(unittest.TestCase):
 
         with self.assertRaisesRegex(PriceWatchError, "more values than headers"):
             load_quotes_csv(path)
+
+
+class XlsxLoaderTests(unittest.TestCase):
+    def write_workbook(self, sheets: dict[str, list[list[object]]]) -> Path:
+        temp_dir = TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        path = Path(temp_dir.name) / "quotes.xlsx"
+
+        workbook = Workbook()
+        default = workbook.active
+        workbook.remove(default)
+        for title, rows in sheets.items():
+            sheet = workbook.create_sheet(title)
+            for row in rows:
+                sheet.append(row)
+        workbook.save(path)
+        workbook.close()
+        return path
+
+    def test_loads_active_sheet_and_defaults_currency(self):
+        path = self.write_workbook(
+            {
+                "Quotes": [
+                    ["supplier", "sku", "unit_cost", "currency"],
+                    ["Arzu", "SKU-1", 100.125, "try"],
+                    [None, None, None, None],
+                    ["MSR", "SKU-2", 55.5, None],
+                ]
+            }
+        )
+
+        quotes = load_quotes_xlsx(path)
+
+        self.assertEqual(len(quotes), 2)
+        self.assertEqual(quotes[0].unit_cost, Decimal("100.13"))
+        self.assertEqual(quotes[0].currency, "TRY")
+        self.assertEqual(quotes[1].currency, "TRY")
+
+    def test_selects_named_sheet_and_applies_explicit_column_map(self):
+        path = self.write_workbook(
+            {
+                "Ignore": [["supplier", "sku", "unit_cost"], ["Wrong", "X", 1]],
+                "Arzu": [
+                    ["Tedarikci", "Urun Kodu", "Alis Fiyati", "Para Birimi"],
+                    ["Arzu", "8690001", 123.45, "try"],
+                ],
+            }
+        )
+
+        quotes = load_quotes_xlsx(
+            path,
+            sheet_name="Arzu",
+            column_map={
+                "Tedarikci": "supplier",
+                "Urun Kodu": "sku",
+                "Alis Fiyati": "unit_cost",
+                "Para Birimi": "currency",
+            },
+        )
+
+        self.assertEqual(len(quotes), 1)
+        self.assertEqual(quotes[0].supplier, "Arzu")
+        self.assertEqual(quotes[0].sku, "8690001")
+        self.assertEqual(quotes[0].unit_cost, Decimal("123.45"))
+
+    def test_missing_named_sheet_is_rejected(self):
+        path = self.write_workbook(
+            {"Quotes": [["supplier", "sku", "unit_cost"], ["Arzu", "SKU-1", 100]]}
+        )
+
+        with self.assertRaisesRegex(PriceWatchError, "worksheet not found"):
+            load_quotes_xlsx(path, sheet_name="Missing")
+
+    def test_missing_required_column_is_rejected(self):
+        path = self.write_workbook(
+            {"Quotes": [["supplier", "sku", "currency"], ["Arzu", "SKU-1", "TRY"]]}
+        )
+
+        with self.assertRaisesRegex(PriceWatchError, "unit_cost"):
+            load_quotes_xlsx(path)
+
+    def test_duplicate_identity_is_rejected(self):
+        path = self.write_workbook(
+            {
+                "Quotes": [
+                    ["supplier", "sku", "unit_cost", "currency"],
+                    ["Arzu", "SKU-1", 100, "TRY"],
+                    ["Arzu", "SKU-1", 110, "TRY"],
+                ]
+            }
+        )
+
+        with self.assertRaisesRegex(PriceWatchError, "duplicate supplier/SKU/currency"):
+            load_quotes_xlsx(path)
 
 
 class PriceComparisonTests(unittest.TestCase):
