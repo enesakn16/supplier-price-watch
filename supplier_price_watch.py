@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from enum import Enum
 from pathlib import Path
+from types import MappingProxyType
 from typing import Iterable, Mapping
 
 from openpyxl import load_workbook
@@ -72,6 +73,81 @@ class SupplierQuote:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class SupplierImportProfile:
+    """Explicit, versioned schema contract for one supplier price-list format."""
+
+    profile_id: str
+    supplier: str
+    version: int
+    column_map: Mapping[str, str]
+    sheet_name: str | None = None
+
+    def __post_init__(self) -> None:
+        profile_id = self.profile_id.strip()
+        supplier = self.supplier.strip()
+        if not profile_id:
+            raise PriceWatchError("profile_id is required")
+        if not supplier:
+            raise PriceWatchError("profile supplier is required")
+        if self.version < 1:
+            raise PriceWatchError("profile version must be at least 1")
+        normalized = _normalize_column_map(self.column_map)
+        object.__setattr__(self, "profile_id", profile_id)
+        object.__setattr__(self, "supplier", supplier)
+        object.__setattr__(self, "column_map", MappingProxyType(normalized))
+        if self.sheet_name is not None:
+            sheet_name = self.sheet_name.strip()
+            if not sheet_name:
+                raise PriceWatchError("profile sheet_name cannot be blank")
+            object.__setattr__(self, "sheet_name", sheet_name)
+
+
+class SupplierProfileRegistry:
+    """Fail-closed registry that resolves exact profile IDs and versions only."""
+
+    def __init__(self, profiles: Iterable[SupplierImportProfile] = ()) -> None:
+        self._profiles: dict[tuple[str, int], SupplierImportProfile] = {}
+        for profile in profiles:
+            self.register(profile)
+
+    def register(self, profile: SupplierImportProfile) -> None:
+        key = (profile.profile_id, profile.version)
+        if key in self._profiles:
+            raise PriceWatchError(
+                f"duplicate supplier profile/version: {profile.profile_id} v{profile.version}"
+            )
+        self._profiles[key] = profile
+
+    def get(self, profile_id: str, *, version: int | None = None) -> SupplierImportProfile:
+        normalized_id = profile_id.strip()
+        if not normalized_id:
+            raise PriceWatchError("profile_id is required")
+
+        if version is not None:
+            profile = self._profiles.get((normalized_id, version))
+            if profile is None:
+                raise PriceWatchError(f"supplier profile not found: {normalized_id} v{version}")
+            return profile
+
+        matches = [
+            profile
+            for (candidate_id, _), profile in self._profiles.items()
+            if candidate_id == normalized_id
+        ]
+        if not matches:
+            raise PriceWatchError(f"supplier profile not found: {normalized_id}")
+        return max(matches, key=lambda profile: profile.version)
+
+    def list_profiles(self) -> tuple[SupplierImportProfile, ...]:
+        return tuple(
+            sorted(
+                self._profiles.values(),
+                key=lambda profile: (profile.profile_id, profile.version),
+            )
+        )
+
+
 def _normalize_column_map(column_map: Mapping[str, str] | None) -> dict[str, str]:
     if column_map is None:
         return {}
@@ -92,6 +168,27 @@ def _normalize_column_map(column_map: Mapping[str, str] | None) -> dict[str, str
         normalized[source] = target
         targets.add(target)
     return normalized
+
+
+def _apply_supplier_profile(
+    quotes: list[SupplierQuote],
+    profile: SupplierImportProfile,
+) -> list[SupplierQuote]:
+    """Bind a profile's trusted supplier identity to parsed rows.
+
+    Supplier names embedded in source files are treated as data, not authority. If
+    the file includes a non-empty supplier value it must agree with the profile.
+    Missing supplier values are safely populated from the selected profile.
+    """
+
+    bound: list[SupplierQuote] = []
+    for quote in quotes:
+        if quote.supplier != profile.supplier:
+            raise PriceWatchError(
+                f"supplier profile mismatch: expected {profile.supplier}, got {quote.supplier}"
+            )
+        bound.append(quote)
+    return bound
 
 
 def load_quotes_csv(
@@ -167,6 +264,18 @@ def load_quotes_csv(
             quotes.append(quote)
 
         return quotes
+
+
+def load_quotes_csv_profile(
+    path: str | Path,
+    profile: SupplierImportProfile,
+) -> list[SupplierQuote]:
+    """Load CSV using one explicit supplier schema profile."""
+
+    return _apply_supplier_profile(
+        load_quotes_csv(path, column_map=profile.column_map),
+        profile,
+    )
 
 
 def load_quotes_xlsx(
@@ -266,6 +375,22 @@ def load_quotes_xlsx(
         return quotes
     finally:
         workbook.close()
+
+
+def load_quotes_xlsx_profile(
+    path: str | Path,
+    profile: SupplierImportProfile,
+) -> list[SupplierQuote]:
+    """Load XLSX using one explicit supplier schema profile."""
+
+    return _apply_supplier_profile(
+        load_quotes_xlsx(
+            path,
+            column_map=profile.column_map,
+            sheet_name=profile.sheet_name,
+        ),
+        profile,
+    )
 
 
 @dataclass(frozen=True, slots=True)
