@@ -56,7 +56,8 @@ class SupplierQuote:
     def from_mapping(cls, row: Mapping[str, object]) -> "SupplierQuote":
         supplier = str(row.get("supplier", "")).strip()
         sku = str(row.get("sku", "")).strip()
-        currency = str(row.get("currency", "TRY")).strip().upper() or "TRY"
+        raw_currency = row.get("currency")
+        currency = "TRY" if raw_currency is None else str(raw_currency).strip().upper() or "TRY"
         if not supplier:
             raise PriceWatchError("supplier is required")
         if not sku:
@@ -107,12 +108,12 @@ def load_quotes_csv(
     """
 
     csv_path = Path(path)
+    mapping = _normalize_column_map(column_map)
+
     try:
         handle = csv_path.open("r", encoding="utf-8-sig", newline="")
     except OSError as exc:
         raise PriceWatchError(f"cannot read CSV: {csv_path}") from exc
-
-    mapping = _normalize_column_map(column_map)
 
     with handle:
         reader = csv.DictReader(handle)
@@ -182,12 +183,12 @@ def load_quotes_xlsx(
     """
 
     xlsx_path = Path(path)
+    mapping = _normalize_column_map(column_map)
+
     try:
         workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
     except (OSError, InvalidFileException, ValueError) as exc:
         raise PriceWatchError(f"cannot read XLSX: {xlsx_path}") from exc
-
-    mapping = _normalize_column_map(column_map)
 
     try:
         if sheet_name is None:
