@@ -170,42 +170,72 @@ def _normalize_column_map(column_map: Mapping[str, str] | None) -> dict[str, str
     return normalized
 
 
+def _normalize_default_supplier(default_supplier: str | None) -> str | None:
+    if default_supplier is None:
+        return None
+    normalized = str(default_supplier).strip()
+    if not normalized:
+        raise PriceWatchError("default supplier cannot be blank")
+    return normalized
+
+
+def _required_columns(default_supplier: str | None) -> frozenset[str]:
+    if default_supplier is None:
+        return REQUIRED_CSV_COLUMNS
+    return REQUIRED_CSV_COLUMNS - {"supplier"}
+
+
+def _bind_row_supplier(
+    row: dict[str, object],
+    default_supplier: str | None,
+) -> dict[str, object]:
+    if default_supplier is None:
+        return row
+
+    embedded_supplier = str(row.get("supplier", "")).strip()
+    if embedded_supplier and embedded_supplier != default_supplier:
+        raise PriceWatchError(
+            f"supplier profile mismatch: expected {default_supplier}, got {embedded_supplier}"
+        )
+
+    row["supplier"] = default_supplier
+    return row
+
+
 def _apply_supplier_profile(
     quotes: list[SupplierQuote],
     profile: SupplierImportProfile,
 ) -> list[SupplierQuote]:
-    """Bind a profile's trusted supplier identity to parsed rows.
+    """Verify that parsed rows are bound to the profile's trusted supplier identity."""
 
-    Supplier names embedded in source files are treated as data, not authority. If
-    the file includes a non-empty supplier value it must agree with the profile.
-    Missing supplier values are safely populated from the selected profile.
-    """
-
-    bound: list[SupplierQuote] = []
     for quote in quotes:
         if quote.supplier != profile.supplier:
             raise PriceWatchError(
                 f"supplier profile mismatch: expected {profile.supplier}, got {quote.supplier}"
             )
-        bound.append(quote)
-    return bound
+    return quotes
 
 
 def load_quotes_csv(
     path: str | Path,
     *,
     column_map: Mapping[str, str] | None = None,
+    default_supplier: str | None = None,
 ) -> list[SupplierQuote]:
     """Load a supplier quote CSV with strict schema and duplicate validation.
 
     Required canonical columns are ``supplier``, ``sku`` and ``unit_cost``.
-    ``currency`` is optional and defaults to TRY. Supplier-specific headers can be
-    mapped explicitly with ``column_map={"source header": "canonical_name"}``.
-    Header guessing is intentionally forbidden.
+    ``currency`` is optional and defaults to TRY. When ``default_supplier`` is
+    provided by a trusted supplier profile, a supplier column is optional; if the
+    source does include one, every non-empty value must match the trusted identity.
+    Supplier-specific headers can be mapped explicitly with
+    ``column_map={"source header": "canonical_name"}``. Header guessing is
+    intentionally forbidden.
     """
 
     csv_path = Path(path)
     mapping = _normalize_column_map(column_map)
+    trusted_supplier = _normalize_default_supplier(default_supplier)
 
     try:
         handle = csv_path.open("r", encoding="utf-8-sig", newline="")
@@ -233,7 +263,7 @@ def load_quotes_csv(
         if len(canonical_headers) != len(set(canonical_headers)):
             raise PriceWatchError("CSV column map creates duplicate canonical columns")
 
-        missing = sorted(REQUIRED_CSV_COLUMNS.difference(canonical_headers))
+        missing = sorted(_required_columns(trusted_supplier).difference(canonical_headers))
         if missing:
             raise PriceWatchError(f"CSV missing required columns: {', '.join(missing)}")
 
@@ -243,7 +273,7 @@ def load_quotes_csv(
             if None in raw_row:
                 raise PriceWatchError(f"CSV row {line_number} has more values than headers")
 
-            row = {
+            row: dict[str, object] = {
                 mapping.get(str(key).strip(), str(key).strip()): value
                 for key, value in raw_row.items()
             }
@@ -251,7 +281,9 @@ def load_quotes_csv(
                 continue
 
             try:
-                quote = SupplierQuote.from_mapping(row)
+                quote = SupplierQuote.from_mapping(
+                    _bind_row_supplier(row, trusted_supplier)
+                )
             except PriceWatchError as exc:
                 raise PriceWatchError(f"CSV row {line_number}: {exc}") from exc
 
@@ -273,7 +305,11 @@ def load_quotes_csv_profile(
     """Load CSV using one explicit supplier schema profile."""
 
     return _apply_supplier_profile(
-        load_quotes_csv(path, column_map=profile.column_map),
+        load_quotes_csv(
+            path,
+            column_map=profile.column_map,
+            default_supplier=profile.supplier,
+        ),
         profile,
     )
 
@@ -283,16 +319,20 @@ def load_quotes_xlsx(
     *,
     column_map: Mapping[str, str] | None = None,
     sheet_name: str | None = None,
+    default_supplier: str | None = None,
 ) -> list[SupplierQuote]:
     """Load one XLSX worksheet using the same explicit schema rules as CSV.
 
     The workbook is opened in read-only/data-only mode. When ``sheet_name`` is
     omitted, the active worksheet is used. Formula cells are never evaluated by
     this loader; callers must provide workbooks with cached values or plain data.
+    A trusted ``default_supplier`` makes the source supplier column optional while
+    still rejecting conflicting supplier values when that column is present.
     """
 
     xlsx_path = Path(path)
     mapping = _normalize_column_map(column_map)
+    trusted_supplier = _normalize_default_supplier(default_supplier)
 
     try:
         workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
@@ -334,7 +374,7 @@ def load_quotes_xlsx(
         if len(canonical_headers) != len(set(canonical_headers)):
             raise PriceWatchError("XLSX column map creates duplicate canonical columns")
 
-        missing = sorted(REQUIRED_CSV_COLUMNS.difference(canonical_headers))
+        missing = sorted(_required_columns(trusted_supplier).difference(canonical_headers))
         if missing:
             raise PriceWatchError(f"XLSX missing required columns: {', '.join(missing)}")
 
@@ -355,12 +395,14 @@ def load_quotes_xlsx(
             if all(value is None or not str(value).strip() for value in materialized):
                 continue
 
-            row = {
+            row: dict[str, object] = {
                 mapping.get(header, header): value
                 for header, value in zip(headers, materialized, strict=True)
             }
             try:
-                quote = SupplierQuote.from_mapping(row)
+                quote = SupplierQuote.from_mapping(
+                    _bind_row_supplier(row, trusted_supplier)
+                )
             except PriceWatchError as exc:
                 raise PriceWatchError(f"XLSX row {row_number}: {exc}") from exc
 
@@ -388,6 +430,7 @@ def load_quotes_xlsx_profile(
             path,
             column_map=profile.column_map,
             sheet_name=profile.sheet_name,
+            default_supplier=profile.supplier,
         ),
         profile,
     )
