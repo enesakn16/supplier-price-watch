@@ -13,4 +13,4 @@ dependencies = [
 ]
 
 [tool.setuptools]
-py-modules = ["supplier_price_watch"]
+py-modules = ["supplier_price_watch", "supplier_profile_config"]
