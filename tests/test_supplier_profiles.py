@@ -1,3 +1,4 @@
+from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -120,7 +121,7 @@ class SupplierImportProfileTests(unittest.TestCase):
         self.assertEqual(len(quotes), 1)
         self.assertEqual(quotes[0].supplier, "Arzu")
         self.assertEqual(quotes[0].sku, "SKU-10")
-        self.assertEqual(quotes[0].unit_cost, 125.40)
+        self.assertEqual(quotes[0].unit_cost, Decimal("125.40"))
 
     def test_xlsx_profile_uses_declared_sheet(self):
         temp_dir = TemporaryDirectory()
@@ -169,7 +170,7 @@ class SupplierImportProfileTests(unittest.TestCase):
         self.assertEqual(len(quotes), 1)
         self.assertEqual(quotes[0].supplier, "Arzu")
         self.assertEqual(quotes[0].sku, "SKU-20")
-        self.assertEqual(quotes[0].unit_cost, 88.75)
+        self.assertEqual(quotes[0].unit_cost, Decimal("88.75"))
 
 
 if __name__ == "__main__":
