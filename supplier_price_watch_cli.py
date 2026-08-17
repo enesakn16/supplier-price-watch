@@ -10,20 +10,48 @@ from supplier_price_watch import (
     PriceComparison,
     PriceWatchError,
     RiskLevel,
+    SupplierImportProfile,
     SupplierQuote,
     compare_catalogs,
     load_quotes_csv,
+    load_quotes_csv_profile,
     load_quotes_xlsx,
+    load_quotes_xlsx_profile,
 )
+from supplier_profile_config import load_profile_registry_json
 
 
-def _load_quotes(path: Path) -> list[SupplierQuote]:
+def _load_quotes(
+    path: Path,
+    *,
+    profile: SupplierImportProfile | None = None,
+) -> list[SupplierQuote]:
     suffix = path.suffix.lower()
     if suffix == ".csv":
+        if profile is not None:
+            return load_quotes_csv_profile(path, profile)
         return load_quotes_csv(path)
     if suffix == ".xlsx":
+        if profile is not None:
+            return load_quotes_xlsx_profile(path, profile)
         return load_quotes_xlsx(path)
     raise PriceWatchError("input files must be .csv or .xlsx")
+
+
+def _resolve_profile(args: argparse.Namespace) -> SupplierImportProfile | None:
+    requested = any(
+        value is not None
+        for value in (args.profile_config, args.profile_id, args.profile_version)
+    )
+    if not requested:
+        return None
+    if args.profile_config is None or args.profile_id is None:
+        raise PriceWatchError(
+            "--profile-config and --profile-id must be provided together"
+        )
+
+    registry = load_profile_registry_json(args.profile_config)
+    return registry.get(args.profile_id, version=args.profile_version)
 
 
 def _risk_rank(risk: RiskLevel) -> int:
@@ -122,6 +150,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("previous", type=Path, help="Previous .csv or .xlsx price list")
     parser.add_argument("current", type=Path, help="Current .csv or .xlsx price list")
     parser.add_argument(
+        "--profile-config",
+        type=Path,
+        help="Strict JSON file containing versioned supplier import profiles.",
+    )
+    parser.add_argument(
+        "--profile-id",
+        help="Profile ID to apply to both snapshots. Requires --profile-config.",
+    )
+    parser.add_argument(
+        "--profile-version",
+        type=int,
+        help="Exact profile version. Omit to use the latest configured version.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         help="Optional UTF-8 CSV report path. Table output is always printed.",
@@ -137,8 +179,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        previous = _load_quotes(args.previous)
-        current = _load_quotes(args.current)
+        profile = _resolve_profile(args)
+        previous = _load_quotes(args.previous, profile=profile)
+        current = _load_quotes(args.current, profile=profile)
         results = _sorted_results(compare_catalogs(previous, current))
         if args.only_risk:
             results = [item for item in results if item.risk is not RiskLevel.OK]
