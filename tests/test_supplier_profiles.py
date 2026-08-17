@@ -28,6 +28,19 @@ class SupplierImportProfileTests(unittest.TestCase):
             sheet_name=sheet_name,
         )
 
+    def supplierless_profile(self, *, sheet_name: str | None = None):
+        return SupplierImportProfile(
+            profile_id="arzu-supplierless",
+            supplier="Arzu",
+            version=1,
+            column_map={
+                "Urun Kodu": "sku",
+                "Alis Fiyati": "unit_cost",
+                "Para Birimi": "currency",
+            },
+            sheet_name=sheet_name,
+        )
+
     def test_profile_mapping_is_immutable(self):
         profile = self.profile()
 
@@ -92,6 +105,23 @@ class SupplierImportProfileTests(unittest.TestCase):
         self.assertEqual(quotes[0].sku, "SKU-1")
         self.assertEqual(quotes[0].currency, "TRY")
 
+    def test_csv_profile_can_supply_missing_supplier_column(self):
+        temp_dir = TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        path = Path(temp_dir.name) / "quotes.csv"
+        path.write_text(
+            "Urun Kodu,Alis Fiyati,Para Birimi\n"
+            "SKU-10,125.40,TRY\n",
+            encoding="utf-8",
+        )
+
+        quotes = load_quotes_csv_profile(path, self.supplierless_profile())
+
+        self.assertEqual(len(quotes), 1)
+        self.assertEqual(quotes[0].supplier, "Arzu")
+        self.assertEqual(quotes[0].sku, "SKU-10")
+        self.assertEqual(quotes[0].unit_cost, 125.40)
+
     def test_xlsx_profile_uses_declared_sheet(self):
         temp_dir = TemporaryDirectory()
         self.addCleanup(temp_dir.cleanup)
@@ -117,6 +147,29 @@ class SupplierImportProfileTests(unittest.TestCase):
         self.assertEqual(len(quotes), 1)
         self.assertEqual(quotes[0].supplier, "Arzu")
         self.assertEqual(quotes[0].sku, "SKU-2")
+
+    def test_xlsx_profile_can_supply_missing_supplier_column(self):
+        temp_dir = TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        path = Path(temp_dir.name) / "quotes.xlsx"
+
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Arzu Listesi"
+        sheet.append(["Urun Kodu", "Alis Fiyati", "Para Birimi"])
+        sheet.append(["SKU-20", 88.75, "TRY"])
+        workbook.save(path)
+        workbook.close()
+
+        quotes = load_quotes_xlsx_profile(
+            path,
+            self.supplierless_profile(sheet_name="Arzu Listesi"),
+        )
+
+        self.assertEqual(len(quotes), 1)
+        self.assertEqual(quotes[0].supplier, "Arzu")
+        self.assertEqual(quotes[0].sku, "SKU-20")
+        self.assertEqual(quotes[0].unit_cost, 88.75)
 
 
 if __name__ == "__main__":
