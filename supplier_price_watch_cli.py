@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+from decimal import Decimal
 from pathlib import Path
 import sys
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from supplier_price_watch import (
     PriceComparison,
@@ -22,6 +23,7 @@ from supplier_profile_config import load_profile_registry_json
 
 
 QuoteIdentity = tuple[str, str, str]
+MatchIdentity = tuple[str, str, Decimal, Decimal]
 
 
 def _load_quotes(
@@ -107,6 +109,37 @@ def _catalog_delta(
     return added, removed
 
 
+def _matched_currency_lookup(
+    previous: Iterable[SupplierQuote],
+    current: Iterable[SupplierQuote],
+) -> dict[MatchIdentity, str]:
+    """Preserve currency for matched report rows without guessing ambiguous identities."""
+
+    previous_index = {_quote_identity(quote): quote for quote in previous}
+    currencies: dict[MatchIdentity, str] = {}
+
+    for current_quote in current:
+        previous_quote = previous_index.get(_quote_identity(current_quote))
+        if previous_quote is None:
+            continue
+
+        key: MatchIdentity = (
+            current_quote.supplier,
+            current_quote.sku,
+            previous_quote.unit_cost,
+            current_quote.unit_cost,
+        )
+        existing = currencies.get(key)
+        if existing is not None and existing != current_quote.currency:
+            raise PriceWatchError(
+                "ambiguous matched currency; supplier/SKU has indistinguishable "
+                "cost rows in multiple currencies"
+            )
+        currencies[key] = current_quote.currency
+
+    return currencies
+
+
 def _format_decimal(value: object | None) -> str:
     return "" if value is None else str(value)
 
@@ -167,6 +200,7 @@ def _write_csv(
     *,
     added: list[SupplierQuote],
     removed: list[SupplierQuote],
+    matched_currencies: Mapping[MatchIdentity, str],
 ) -> None:
     try:
         with path.open("w", encoding="utf-8", newline="") as handle:
@@ -186,12 +220,23 @@ def _write_csv(
                 ]
             )
             for item in results:
+                match_key: MatchIdentity = (
+                    item.supplier,
+                    item.sku,
+                    item.previous_cost,
+                    item.current_cost,
+                )
+                currency = matched_currencies.get(match_key)
+                if currency is None:
+                    raise PriceWatchError(
+                        f"matched currency missing for {item.supplier}/{item.sku}"
+                    )
                 writer.writerow(
                     [
                         "matched",
                         item.supplier,
                         item.sku,
-                        "",
+                        currency,
                         item.previous_cost,
                         item.current_cost,
                         item.absolute_change,
@@ -276,6 +321,7 @@ def main(argv: list[str] | None = None) -> int:
         profile = _resolve_profile(args)
         previous = _load_quotes(args.previous, profile=profile)
         current = _load_quotes(args.current, profile=profile)
+        matched_currencies = _matched_currency_lookup(previous, current)
         results = _sorted_results(compare_catalogs(previous, current))
         added, removed = _catalog_delta(previous, current)
 
@@ -289,7 +335,13 @@ def main(argv: list[str] | None = None) -> int:
         _print_catalog_delta(added, removed)
 
         if args.output is not None:
-            _write_csv(args.output, results, added=added, removed=removed)
+            _write_csv(
+                args.output,
+                results,
+                added=added,
+                removed=removed,
+                matched_currencies=matched_currencies,
+            )
             print(f"Report written: {args.output}")
         return 0
     except PriceWatchError as exc:
