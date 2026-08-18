@@ -1,42 +1,125 @@
 # Supplier Price Watch
 
-Supplier Price Watch is a lightweight procurement intelligence tool for comparing recurring supplier price lists, detecting purchase-cost changes, and surfacing gross-margin risk before those changes reach selling prices.
+Supplier Price Watch is a procurement-intelligence tool for comparing recurring supplier price lists, detecting purchase-cost changes, and surfacing financially unsafe catalog changes before they reach selling prices.
 
-It is built for motorcycle-parts and e-commerce operations that need a deterministic answer to three questions:
+It is built for motorcycle-parts and e-commerce operations that need deterministic answers to four questions:
 
 1. Which supplier SKUs became more expensive or cheaper?
-2. Which cost changes materially reduce gross margin?
-3. Which rows cannot be compared safely and therefore need manual review?
+2. Which rows can be compared safely without guessing product identity?
+3. Which supplier file schemas changed and therefore require an explicit import profile update?
+4. Which results need purchasing review before price or stock decisions are made?
 
-> Status: **In development, working CSV MVP.** Strict CSV ingestion, explicit supplier column mapping, Decimal-based price comparison, margin-risk classification, regression tests, and GitHub Actions CI are implemented. XLSX ingestion, richer product identity mapping, and report export are still pending.
+> Status: **In development, working CSV/XLSX + CLI MVP.** Strict CSV/XLSX ingestion, versioned supplier profiles, Decimal-based price comparison, regression tests, and GitHub Actions CI are implemented. Barcode/EAN identity mapping, added/removed SKU reporting, verified real-supplier profile fixtures, and the first public release are still pending.
 
 ## What works today
 
-- Strict CSV supplier-list ingestion with UTF-8 BOM support
-- Required `supplier`, `sku`, and `unit_cost` fields
-- Optional `currency` field with `TRY` default
-- Explicit supplier-specific header mapping without guessing
-- Duplicate-column, missing-column, malformed-row, and duplicate-identity rejection
+- Strict CSV ingestion with UTF-8 BOM support
+- Strict XLSX ingestion through `openpyxl` in read-only/data-only mode
+- Canonical `supplier`, `sku`, `unit_cost`, and optional `currency` fields
+- `TRY` as the explicit default when currency is blank or omitted
+- Explicit supplier-specific header mapping without fuzzy guessing
+- Versioned `SupplierImportProfile` definitions with optional worksheet selection
+- Strict JSON profile registry loading with duplicate-key and unknown-field rejection
+- Profile-bound supplier identity, so a trusted profile can supply the supplier name even when the source file has no supplier column
+- Fail-closed rejection when an embedded supplier conflicts with the selected profile
+- Duplicate-column, missing-column, malformed-row, invalid-price, and duplicate-identity rejection
 - `Decimal`-based purchase-price calculations and financial rounding
 - Absolute and percentage purchase-cost change calculation
-- Gross-margin calculation from an explicitly supplied sale price
+- Gross-margin calculation when an explicit sale price is supplied to the domain API
 - `OK`, `WARNING`, and `CRITICAL` margin-risk classification
 - Exact `supplier + SKU + currency` catalog matching
-- Fail-closed behavior for supplier, SKU, or currency mismatches
+- Command-line comparison for `.csv` and `.xlsx` snapshots
+- Optional UTF-8 CSV comparison report export
 - Unit/regression tests
 - GitHub Actions CI on Python 3.11 and 3.13
 
 ## Quick start
 
-The current CSV core uses only the Python standard library.
+Python 3.11+ is required.
 
 ```bash
 git clone https://github.com/enesakn16/supplier-price-watch.git
 cd supplier-price-watch
+python -m pip install -e .
 python -m unittest discover -s tests -v
 ```
 
-Minimal comparison example:
+Compare two canonical snapshots from the terminal:
+
+```bash
+python supplier_price_watch_cli.py previous.csv current.csv
+```
+
+Write the comparison to a report as well:
+
+```bash
+python supplier_price_watch_cli.py previous.xlsx current.xlsx --output report.csv
+```
+
+The CLI returns exit code `2` for invalid input/profile conditions instead of continuing with a guessed result.
+
+## Canonical supplier format
+
+Canonical CSV input:
+
+```csv
+supplier,sku,unit_cost,currency
+Supplier A,8690001,123.45,TRY
+Supplier B,BTZ10S,1120.00,TRY
+```
+
+The same canonical field names can be used in XLSX workbooks.
+
+A quote identity is currently:
+
+```text
+supplier + SKU + currency
+```
+
+Rows outside that exact identity are never silently paired.
+
+## Versioned supplier profiles
+
+Real supplier sheets often use their own headers or omit a supplier column entirely. Supplier Price Watch handles that through explicit, versioned import contracts rather than header guessing.
+
+Example profile configuration:
+
+```json
+[
+  {
+    "profile_id": "supplier-a",
+    "supplier": "Supplier A",
+    "version": 1,
+    "column_map": {
+      "Urun Kodu": "sku",
+      "Alis Fiyati": "unit_cost",
+      "Para Birimi": "currency"
+    },
+    "sheet_name": "Fiyat Listesi"
+  }
+]
+```
+
+Use it from the CLI:
+
+```bash
+python supplier_price_watch_cli.py old.xlsx new.xlsx \
+  --profile-config supplier-profiles.json \
+  --profile-id supplier-a
+```
+
+Omit `--profile-version` to select the latest configured version, or pin one explicitly:
+
+```bash
+python supplier_price_watch_cli.py old.xlsx new.xlsx \
+  --profile-config supplier-profiles.json \
+  --profile-id supplier-a \
+  --profile-version 1
+```
+
+Profiles are intentionally strict. Unknown JSON fields, duplicate JSON keys, invalid versions, duplicate profile/version pairs, unsupported canonical targets, missing mapped source columns, and supplier-identity mismatches fail closed.
+
+## Python API example
 
 ```python
 from supplier_price_watch import SupplierQuote, compare_quote
@@ -67,103 +150,79 @@ print(result.gross_margin_percent)
 print(result.risk.value)
 ```
 
-## Supplier CSV format
-
-Canonical input:
-
-```csv
-supplier,sku,unit_cost,currency
-Arzu Bisiklet,8690001,123.45,TRY
-MSR,BTZ10S,1120.00,TRY
-```
-
-Supplier-specific headers must be mapped explicitly. The loader intentionally does **not** guess column meanings:
-
-```python
-from supplier_price_watch import load_quotes_csv
-
-quotes = load_quotes_csv(
-    "supplier-list.csv",
-    column_map={
-        "Tedarikci": "supplier",
-        "Urun Kodu": "sku",
-        "Alis Fiyati": "unit_cost",
-        "Para Birimi": "currency",
-    },
-)
-```
-
-If a mapped source column does not exist, two source columns collide into one canonical field, a row contains extra values, or the same `supplier + SKU + currency` identity appears twice, loading fails instead of silently inventing a result.
-
 ## Price and margin rules
 
 All monetary arithmetic uses `decimal.Decimal`; binary floating-point arithmetic is not used for purchasing or margin decisions.
 
-A quote comparison is allowed only when supplier, SKU, and currency match exactly. Currency conversion is deliberately outside the comparison engine: TRY and USD quotes are never compared as if they were equivalent.
+Currency conversion is deliberately outside the comparison engine: TRY and USD quotes are never compared as if they were equivalent.
 
-When a sale price is supplied, gross margin is calculated as:
+When a sale price is supplied to `compare_quote`, gross margin is calculated as:
 
 ```text
 (sale price - current purchase cost) / sale price × 100
 ```
 
-The default risk boundaries are:
+Default domain thresholds are:
 
 - `CRITICAL`: gross margin <= 10%
 - `WARNING`: gross margin <= 20%
 - `OK`: gross margin > 20%
 
-These thresholds can be overridden per comparison. They are defaults for the engine, not claims about the correct commercial policy for every business.
+These thresholds can be overridden by callers. They are engine defaults, not a claim about the correct commercial policy for every business.
+
+> Current CLI catalog comparison does not yet enrich rows with sale prices. Margin-risk output therefore becomes useful only after sale-price/catalog enrichment is added. The CLI does not pretend otherwise.
 
 ## Matching policy
 
-The current catalog comparison intentionally matches only the exact tuple:
+The current matching layer is intentionally conservative:
 
 ```text
 supplier + SKU + currency
 ```
 
-Unmatched rows are ignored rather than guessed. This prevents unrelated products from being paired because their descriptions look similar.
+Unmatched rows are not guessed from product descriptions. This prevents two unrelated parts from being paired because their text happens to look similar.
 
-The next matching layer will add controlled barcode/EAN and explicit alias support. Fuzzy name matching, if added later, will be review-only and must never silently create a purchasing match.
+The next identity layer will add controlled barcode/EAN and explicit SKU aliases. Fuzzy name matching, if introduced later, will be review-only and must never silently create a purchasing match.
 
-## Test and CI status
+## Tests and CI
 
-Run the same deterministic test suite locally with:
+Run the full deterministic suite locally with:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-GitHub Actions executes the suite on Python 3.11 and 3.13 for pushes to `main` and pull requests. The latest implemented CSV column-profile change is green in CI.
+The tests cover the financial domain, CSV/XLSX ingestion, supplier profile rules, strict JSON profile loading, supplierless profile imports, version resolution, and CLI profile workflows.
 
-## Security and data handling
+GitHub Actions runs the suite on Python 3.11 and 3.13 for pushes to `main` and pull requests.
 
-Real supplier price lists can contain commercially sensitive pricing information.
+## Security and commercial-data handling
 
-- Do not commit production supplier lists.
+Real supplier price lists can contain commercially sensitive information.
+
+- Do not commit production supplier price lists.
 - Do not commit supplier credentials, API keys, customer data, or private commercial terms.
-- Test fixtures and examples must use synthetic data.
+- Fixtures and documentation examples must use synthetic data unless redistribution is explicitly permitted.
 - Raw supplier files should remain immutable inputs; normalized records should be derived from them.
 - Ambiguous product identities must fail closed and be surfaced for manual review.
+- Supplier profiles must be derived from verified source-file schemas; do not invent production mappings from memory.
 
 ## Roadmap
 
 The next high-value milestones are:
 
-1. XLSX ingestion using the same explicit column-profile rules as CSV
-2. Barcode/EAN and controlled SKU-alias identity mapping
-3. Added/removed SKU reporting instead of silently dropping unmatched catalog rows
-4. Best verified supplier-price comparison per product
-5. CSV report export suitable for purchasing review
-6. Packaging with `pyproject.toml` and a small command-line interface
-7. Synthetic end-to-end fixtures and a first tagged release
+1. Add verified supplier-profile fixtures derived from real file headers, using synthetic row values
+2. Add barcode/EAN and controlled SKU-alias identity mapping
+3. Report added/removed SKUs instead of silently dropping unmatched catalog rows
+4. Enrich comparisons with an explicit sale-price catalog for real margin-risk CLI reports
+5. Produce purchasing-focused CSV/XLSX reports with review status
+6. Add release notes, changelog, license, and the first tagged release
 
 A web UI, database, or hosted service will only be added if the product actually needs one.
 
-## Definition of done for the first release
+## Definition of done for the first public release
 
-The first public release is not ready until a user can import two synthetic supplier snapshots, obtain a deterministic SKU-level change report, identify margin-risk rows, review additions/removals, run the full test suite locally, and see the same suite pass in CI.
+The first public release is not ready until a user can import two synthetic supplier snapshots, select a verified versioned import profile, obtain a deterministic SKU-level change report, review additions/removals, identify margin-risk rows from an explicit sale-price source, run the full test suite locally, and see the same suite pass in CI.
 
 ## License
 
