@@ -21,6 +21,9 @@ from supplier_price_watch import (
 from supplier_profile_config import load_profile_registry_json
 
 
+QuoteIdentity = tuple[str, str, str]
+
+
 def _load_quotes(
     path: Path,
     *,
@@ -74,6 +77,36 @@ def _sorted_results(results: Iterable[PriceComparison]) -> list[PriceComparison]
     )
 
 
+def _quote_identity(quote: SupplierQuote) -> QuoteIdentity:
+    return (quote.supplier, quote.sku, quote.currency)
+
+
+def _catalog_delta(
+    previous: Iterable[SupplierQuote],
+    current: Iterable[SupplierQuote],
+) -> tuple[list[SupplierQuote], list[SupplierQuote]]:
+    """Return newly added and removed exact supplier/SKU/currency identities."""
+
+    previous_index = {_quote_identity(quote): quote for quote in previous}
+    current_index = {_quote_identity(quote): quote for quote in current}
+
+    added = [
+        current_index[identity]
+        for identity in sorted(
+            current_index.keys() - previous_index.keys(),
+            key=lambda value: tuple(part.casefold() for part in value),
+        )
+    ]
+    removed = [
+        previous_index[identity]
+        for identity in sorted(
+            previous_index.keys() - current_index.keys(),
+            key=lambda value: tuple(part.casefold() for part in value),
+        )
+    ]
+    return added, removed
+
+
 def _format_decimal(value: object | None) -> str:
     return "" if value is None else str(value)
 
@@ -107,14 +140,43 @@ def _print_table(results: list[PriceComparison]) -> None:
         print(render(row))
 
 
-def _write_csv(path: Path, results: list[PriceComparison]) -> None:
+def _print_catalog_delta(
+    added: list[SupplierQuote],
+    removed: list[SupplierQuote],
+) -> None:
+    if not added and not removed:
+        return
+
+    print()
+    print("Catalog changes:")
+    for quote in added:
+        print(
+            f"+ ADDED    {quote.supplier} | {quote.sku} | "
+            f"{quote.unit_cost} {quote.currency}"
+        )
+    for quote in removed:
+        print(
+            f"- REMOVED  {quote.supplier} | {quote.sku} | "
+            f"{quote.unit_cost} {quote.currency}"
+        )
+
+
+def _write_csv(
+    path: Path,
+    results: list[PriceComparison],
+    *,
+    added: list[SupplierQuote],
+    removed: list[SupplierQuote],
+) -> None:
     try:
         with path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle)
             writer.writerow(
                 [
+                    "status",
                     "supplier",
                     "sku",
+                    "currency",
                     "previous_cost",
                     "current_cost",
                     "absolute_change",
@@ -126,14 +188,46 @@ def _write_csv(path: Path, results: list[PriceComparison]) -> None:
             for item in results:
                 writer.writerow(
                     [
+                        "matched",
                         item.supplier,
                         item.sku,
+                        "",
                         item.previous_cost,
                         item.current_cost,
                         item.absolute_change,
                         _format_decimal(item.percent_change),
                         _format_decimal(item.gross_margin_percent),
                         item.risk.value,
+                    ]
+                )
+            for quote in added:
+                writer.writerow(
+                    [
+                        "added",
+                        quote.supplier,
+                        quote.sku,
+                        quote.currency,
+                        "",
+                        quote.unit_cost,
+                        "",
+                        "",
+                        "",
+                        "",
+                    ]
+                )
+            for quote in removed:
+                writer.writerow(
+                    [
+                        "removed",
+                        quote.supplier,
+                        quote.sku,
+                        quote.currency,
+                        quote.unit_cost,
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
                     ]
                 )
     except OSError as exc:
@@ -143,8 +237,8 @@ def _write_csv(path: Path, results: list[PriceComparison]) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Compare two supplier price-list snapshots. Only exact "
-            "supplier/SKU/currency matches are compared."
+            "Compare two supplier price-list snapshots. Exact supplier/SKU/currency "
+            "matches are compared and catalog additions/removals are reported separately."
         )
     )
     parser.add_argument("previous", type=Path, help="Previous .csv or .xlsx price list")
@@ -171,7 +265,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--only-risk",
         action="store_true",
-        help="Show only warning/critical rows. Requires margin data in future catalog workflows.",
+        help="Show only warning/critical matched rows. Catalog additions/removals remain visible.",
     )
     return parser
 
@@ -183,6 +277,8 @@ def main(argv: list[str] | None = None) -> int:
         previous = _load_quotes(args.previous, profile=profile)
         current = _load_quotes(args.current, profile=profile)
         results = _sorted_results(compare_catalogs(previous, current))
+        added, removed = _catalog_delta(previous, current)
+
         if args.only_risk:
             results = [item for item in results if item.risk is not RiskLevel.OK]
 
@@ -190,9 +286,10 @@ def main(argv: list[str] | None = None) -> int:
             print("No matching supplier/SKU/currency rows to report.")
         else:
             _print_table(results)
+        _print_catalog_delta(added, removed)
 
         if args.output is not None:
-            _write_csv(args.output, results)
+            _write_csv(args.output, results, added=added, removed=removed)
             print(f"Report written: {args.output}")
         return 0
     except PriceWatchError as exc:
