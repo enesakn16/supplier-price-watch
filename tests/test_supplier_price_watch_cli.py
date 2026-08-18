@@ -1,6 +1,7 @@
 import argparse
 import contextlib
 import csv
+from decimal import Decimal
 import io
 import json
 from pathlib import Path
@@ -9,8 +10,8 @@ import unittest
 
 from openpyxl import Workbook
 
-from supplier_price_watch import PriceWatchError
-from supplier_price_watch_cli import _resolve_profile, main
+from supplier_price_watch import PriceWatchError, SupplierQuote
+from supplier_price_watch_cli import _matched_currency_lookup, _resolve_profile, main
 
 
 class SupplierPriceWatchCliProfileTests(unittest.TestCase):
@@ -200,12 +201,55 @@ class SupplierPriceWatchCliProfileTests(unittest.TestCase):
 
         by_status = {row["status"]: row for row in rows}
         self.assertEqual(set(by_status), {"matched", "added", "removed"})
+        self.assertEqual(by_status["matched"]["currency"], "TRY")
         self.assertEqual(by_status["added"]["sku"], "SKU-NEW")
         self.assertEqual(by_status["added"]["current_cost"], "70.00")
         self.assertEqual(by_status["added"]["currency"], "TRY")
         self.assertEqual(by_status["removed"]["sku"], "SKU-OLD")
         self.assertEqual(by_status["removed"]["previous_cost"], "50.00")
         self.assertEqual(by_status["removed"]["currency"], "TRY")
+
+    def test_csv_report_preserves_distinct_matched_currencies(self) -> None:
+        previous = self.root / "previous.csv"
+        current = self.root / "current.csv"
+        report = self.root / "report.csv"
+        previous.write_text(
+            "supplier,sku,unit_cost,currency\n"
+            "Arzu,SKU-TRY,100,TRY\n"
+            "Arzu,SKU-USD,10,USD\n",
+            encoding="utf-8",
+        )
+        current.write_text(
+            "supplier,sku,unit_cost,currency\n"
+            "Arzu,SKU-TRY,110,TRY\n"
+            "Arzu,SKU-USD,11,USD\n",
+            encoding="utf-8",
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            exit_code = main(
+                [str(previous), str(current), "--output", str(report)]
+            )
+
+        self.assertEqual(exit_code, 0)
+        with report.open("r", encoding="utf-8", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+
+        currencies = {row["sku"]: row["currency"] for row in rows}
+        self.assertEqual(currencies, {"SKU-TRY": "TRY", "SKU-USD": "USD"})
+
+    def test_matched_currency_lookup_rejects_indistinguishable_multi_currency_rows(self) -> None:
+        previous = [
+            SupplierQuote("Arzu", "SKU-1", Decimal("100.00"), "TRY"),
+            SupplierQuote("Arzu", "SKU-1", Decimal("100.00"), "USD"),
+        ]
+        current = [
+            SupplierQuote("Arzu", "SKU-1", Decimal("110.00"), "TRY"),
+            SupplierQuote("Arzu", "SKU-1", Decimal("110.00"), "USD"),
+        ]
+
+        with self.assertRaisesRegex(PriceWatchError, "ambiguous matched currency"):
+            _matched_currency_lookup(previous, current)
 
     def test_xlsx_cli_uses_latest_profile_and_declared_sheet(self) -> None:
         config = self._write_profiles()
