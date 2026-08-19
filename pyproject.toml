@@ -12,5 +12,13 @@ dependencies = [
   "openpyxl>=3.1,<4",
 ]
 
+[project.scripts]
+supplier-price-watch = "supplier_price_watch_cli:main"
+
 [tool.setuptools]
-py-modules = ["supplier_price_watch", "supplier_profile_config"]
+py-modules = [
+  "supplier_price_watch",
+  "supplier_price_watch_cli",
+  "supplier_profile_config",
+  "sales_catalog",
+]
