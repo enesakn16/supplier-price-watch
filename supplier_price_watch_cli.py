@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 from typing import Iterable, Mapping
 
+from sales_catalog import load_sales_catalog_csv, sale_price_mapping_for_quotes
 from supplier_price_watch import (
     PriceComparison,
     PriceWatchError,
@@ -303,6 +304,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Exact profile version. Omit to use the latest configured version.",
     )
     parser.add_argument(
+        "--sales-catalog",
+        type=Path,
+        help=(
+            "Optional strict CSV with sku,sale_price[,currency]. When supplied, "
+            "matched rows include gross margin and OK/WARNING/CRITICAL risk."
+        ),
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         help="Optional UTF-8 CSV report path. Table output is always printed.",
@@ -310,7 +319,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--only-risk",
         action="store_true",
-        help="Show only warning/critical matched rows. Catalog additions/removals remain visible.",
+        help=(
+            "Show only warning/critical matched rows. Requires --sales-catalog; "
+            "catalog additions/removals remain visible."
+        ),
     )
     return parser
 
@@ -318,11 +330,22 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.only_risk and args.sales_catalog is None:
+            raise PriceWatchError("--only-risk requires --sales-catalog")
+
         profile = _resolve_profile(args)
         previous = _load_quotes(args.previous, profile=profile)
         current = _load_quotes(args.current, profile=profile)
         matched_currencies = _matched_currency_lookup(previous, current)
-        results = _sorted_results(compare_catalogs(previous, current))
+
+        sale_prices = None
+        if args.sales_catalog is not None:
+            sales_catalog = load_sales_catalog_csv(args.sales_catalog)
+            sale_prices = sale_price_mapping_for_quotes(sales_catalog, current)
+
+        results = _sorted_results(
+            compare_catalogs(previous, current, sale_prices=sale_prices)
+        )
         added, removed = _catalog_delta(previous, current)
 
         if args.only_risk:
