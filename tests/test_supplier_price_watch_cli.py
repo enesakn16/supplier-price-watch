@@ -209,6 +209,83 @@ class SupplierPriceWatchCliProfileTests(unittest.TestCase):
         self.assertEqual(by_status["removed"]["previous_cost"], "50.00")
         self.assertEqual(by_status["removed"]["currency"], "TRY")
 
+    def test_operational_summary_counts_price_direction_and_catalog_delta(self) -> None:
+        previous = self.root / "previous.csv"
+        current = self.root / "current.csv"
+        previous.write_text(
+            "supplier,sku,unit_cost,currency\n"
+            "Arzu,SKU-UP,100,TRY\n"
+            "Arzu,SKU-DOWN,100,TRY\n"
+            "Arzu,SKU-SAME,100,TRY\n"
+            "Arzu,SKU-OLD,50,TRY\n",
+            encoding="utf-8",
+        )
+        current.write_text(
+            "supplier,sku,unit_cost,currency\n"
+            "Arzu,SKU-UP,110,TRY\n"
+            "Arzu,SKU-DOWN,90,TRY\n"
+            "Arzu,SKU-SAME,100,TRY\n"
+            "Arzu,SKU-NEW,70,TRY\n",
+            encoding="utf-8",
+        )
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main([str(previous), str(current)])
+
+        output = stdout.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("matched=3  price_up=1  price_down=1  unchanged=1", output)
+        self.assertIn("added=1  removed=1", output)
+        self.assertIn(
+            "margin_checked=0  (provide --sales-catalog for margin risk)", output
+        )
+
+    def test_operational_summary_counts_margin_risk_before_only_risk_filter(self) -> None:
+        previous = self.root / "previous.csv"
+        current = self.root / "current.csv"
+        sales = self.root / "sales.csv"
+        previous.write_text(
+            "supplier,sku,unit_cost,currency\n"
+            "Arzu,SKU-CRITICAL,90,TRY\n"
+            "Arzu,SKU-WARNING,80,TRY\n"
+            "Arzu,SKU-OK,60,TRY\n",
+            encoding="utf-8",
+        )
+        current.write_text(
+            "supplier,sku,unit_cost,currency\n"
+            "Arzu,SKU-CRITICAL,95,TRY\n"
+            "Arzu,SKU-WARNING,85,TRY\n"
+            "Arzu,SKU-OK,70,TRY\n",
+            encoding="utf-8",
+        )
+        sales.write_text(
+            "sku,sale_price,currency\n"
+            "SKU-CRITICAL,100,TRY\n"
+            "SKU-WARNING,100,TRY\n"
+            "SKU-OK,100,TRY\n",
+            encoding="utf-8",
+        )
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    str(previous),
+                    str(current),
+                    "--sales-catalog",
+                    str(sales),
+                    "--only-risk",
+                ]
+            )
+
+        output = stdout.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("margin_checked=3  warning=1  critical=1", output)
+        self.assertIn("SKU-CRITICAL", output)
+        self.assertIn("SKU-WARNING", output)
+        self.assertNotIn("SKU-OK", output.split("supplier", 1)[-1])
+
     def test_csv_report_preserves_distinct_matched_currencies(self) -> None:
         previous = self.root / "previous.csv"
         current = self.root / "current.csv"
