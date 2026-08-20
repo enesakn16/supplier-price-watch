@@ -145,6 +145,38 @@ def _format_decimal(value: object | None) -> str:
     return "" if value is None else str(value)
 
 
+def _print_summary(
+    results: list[PriceComparison],
+    *,
+    added: list[SupplierQuote],
+    removed: list[SupplierQuote],
+) -> None:
+    """Print a compact operational summary before detailed rows."""
+
+    increased = sum(item.absolute_change > 0 for item in results)
+    decreased = sum(item.absolute_change < 0 for item in results)
+    unchanged = len(results) - increased - decreased
+
+    margin_results = [item for item in results if item.gross_margin_percent is not None]
+    warning_count = sum(item.risk is RiskLevel.WARNING for item in margin_results)
+    critical_count = sum(item.risk is RiskLevel.CRITICAL for item in margin_results)
+
+    print("Summary:")
+    print(
+        f"  matched={len(results)}  price_up={increased}  price_down={decreased}  "
+        f"unchanged={unchanged}"
+    )
+    print(f"  added={len(added)}  removed={len(removed)}")
+    if margin_results:
+        print(
+            f"  margin_checked={len(margin_results)}  warning={warning_count}  "
+            f"critical={critical_count}"
+        )
+    else:
+        print("  margin_checked=0  (provide --sales-catalog for margin risk)")
+    print()
+
+
 def _print_table(results: list[PriceComparison]) -> None:
     headers = ("supplier", "sku", "old", "new", "change", "%", "margin%", "risk")
     rows = [
@@ -347,6 +379,8 @@ def main(argv: list[str] | None = None) -> int:
             compare_catalogs(previous, current, sale_prices=sale_prices)
         )
         added, removed = _catalog_delta(previous, current)
+
+        _print_summary(results, added=added, removed=removed)
 
         if args.only_risk:
             results = [item for item in results if item.risk is not RiskLevel.OK]
