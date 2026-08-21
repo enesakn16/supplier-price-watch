@@ -7,10 +7,16 @@ name = "supplier-price-watch"
 version = "0.1.0"
 description = "Compare supplier price lists, detect cost changes, and surface margin risk safely."
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.11"
 dependencies = [
   "openpyxl>=3.1,<4",
 ]
+
+[project.urls]
+Homepage = "https://github.com/enesakn16/supplier-price-watch"
+Repository = "https://github.com/enesakn16/supplier-price-watch"
+Issues = "https://github.com/enesakn16/supplier-price-watch/issues"
 
 [project.scripts]
 supplier-price-watch = "supplier_price_watch_cli:main"
