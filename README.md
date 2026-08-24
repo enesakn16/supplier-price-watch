@@ -78,6 +78,54 @@ supplier-price-watch previous.xlsx current.xlsx \
 
 The CLI returns exit code `2` for invalid input/profile/catalog conditions instead of continuing with a guessed result.
 
+## Reproducible synthetic demo
+
+The following demo uses only synthetic commercial data and exercises the full snapshot + catalog-delta + margin-risk path.
+
+Create `previous.csv`:
+
+```csv
+supplier,sku,unit_cost,currency
+Demo Supplier,TYRE-001,100.00,TRY
+Demo Supplier,BRAKE-002,200.00,TRY
+Demo Supplier,CHAIN-003,300.00,TRY
+```
+
+Create `current.csv`:
+
+```csv
+supplier,sku,unit_cost,currency
+Demo Supplier,TYRE-001,120.00,TRY
+Demo Supplier,BRAKE-002,180.00,TRY
+Demo Supplier,FILTER-004,90.00,TRY
+```
+
+Create `sales.csv`:
+
+```csv
+sku,sale_price,currency
+TYRE-001,130.00,TRY
+BRAKE-002,300.00,TRY
+FILTER-004,150.00,TRY
+```
+
+Run:
+
+```bash
+supplier-price-watch previous.csv current.csv \
+  --sales-catalog sales.csv \
+  --output report.csv
+```
+
+This scenario is intentionally chosen to produce all three operational signal types:
+
+- `TYRE-001`: matched SKU with a purchase-cost increase and low gross margin, therefore a margin-risk signal
+- `BRAKE-002`: matched SKU with a purchase-cost decrease and healthy margin
+- `CHAIN-003`: `removed` from the current supplier snapshot
+- `FILTER-004`: `added` in the current supplier snapshot
+
+The command also writes `report.csv`, so the same deterministic output can be inspected or passed to a downstream spreadsheet/reporting step. No supplier identity, currency conversion, or product alias is inferred during this demo.
+
 ## Canonical supplier format
 
 Canonical CSV input:
