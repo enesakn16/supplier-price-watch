@@ -1,0 +1,23 @@
+[
+  {
+    "profile_id": "turkish-csv-standard",
+    "supplier": "Example Supplier",
+    "version": 1,
+    "column_map": {
+      "Stok Kodu": "sku",
+      "Alis Fiyati": "unit_cost",
+      "Para Birimi": "currency"
+    }
+  },
+  {
+    "profile_id": "turkish-xlsx-price-list",
+    "supplier": "Example Supplier",
+    "version": 1,
+    "column_map": {
+      "Urun Kodu": "sku",
+      "Net Fiyat": "unit_cost",
+      "Doviz": "currency"
+    },
+    "sheet_name": "Fiyat Listesi"
+  }
+]
