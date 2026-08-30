@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import csv
 from decimal import Decimal
+import os
 from pathlib import Path
 import sys
+import tempfile
 from typing import Iterable, Mapping
 
 from sales_catalog import load_sales_catalog_csv, sale_price_mapping_for_quotes
@@ -235,8 +237,19 @@ def _write_csv(
     removed: list[SupplierQuote],
     matched_currencies: Mapping[MatchIdentity, str],
 ) -> None:
+    temp_path: Path | None = None
     try:
-        with path.open("w", encoding="utf-8", newline="") as handle:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_path = Path(handle.name)
             writer = csv.writer(handle)
             writer.writerow(
                 [
@@ -308,8 +321,20 @@ def _write_csv(
                         "",
                     ]
                 )
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+        temp_path = None
+    except PriceWatchError:
+        raise
     except OSError as exc:
         raise PriceWatchError(f"cannot write report CSV: {path}") from exc
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def build_parser() -> argparse.ArgumentParser:
