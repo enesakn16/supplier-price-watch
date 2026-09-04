@@ -27,4 +27,5 @@ py-modules = [
   "supplier_price_watch_cli",
   "supplier_profile_config",
   "sales_catalog",
+  "product_identity",
 ]
