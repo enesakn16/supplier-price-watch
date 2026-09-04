@@ -9,6 +9,7 @@ import sys
 import tempfile
 from typing import Iterable, Mapping
 
+from product_identity import load_identity_registry_json
 from sales_catalog import load_sales_catalog_csv, sale_price_mapping_for_quotes
 from supplier_price_watch import (
     PriceComparison,
@@ -361,6 +362,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Exact profile version. Omit to use the latest configured version.",
     )
     parser.add_argument(
+        "--identity-map",
+        type=Path,
+        help=(
+            "Optional strict JSON product identity map. Supplier SKUs are canonicalized "
+            "before snapshot comparison and sales-catalog margin lookup."
+        ),
+    )
+    parser.add_argument(
         "--sales-catalog",
         type=Path,
         help=(
@@ -393,6 +402,12 @@ def main(argv: list[str] | None = None) -> int:
         profile = _resolve_profile(args)
         previous = _load_quotes(args.previous, profile=profile)
         current = _load_quotes(args.current, profile=profile)
+
+        if args.identity_map is not None:
+            identity_registry = load_identity_registry_json(args.identity_map)
+            previous = identity_registry.canonicalize_quotes(previous)
+            current = identity_registry.canonicalize_quotes(current)
+
         matched_currencies = _matched_currency_lookup(previous, current)
 
         sale_prices = None
