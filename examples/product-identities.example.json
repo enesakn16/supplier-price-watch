@@ -1,0 +1,19 @@
+[
+  {
+    "supplier": "Arzu Bisiklet",
+    "source_sku": "OLD-TYRE-42",
+    "canonical_sku": "TYRE-42",
+    "barcode": "8691234567890"
+  },
+  {
+    "supplier": "Arzu Bisiklet",
+    "source_sku": "NEW-TYRE-42",
+    "canonical_sku": "TYRE-42",
+    "barcode": "8691234567890"
+  },
+  {
+    "supplier": "Motostar",
+    "source_sku": "MSR-PCX-BALATA-01",
+    "canonical_sku": "PCX-ARKA-BALATA-01"
+  }
+]
