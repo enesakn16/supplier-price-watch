@@ -1,16 +1,17 @@
 # Supplier Price Watch
 
-Supplier Price Watch is a procurement-intelligence CLI for comparing recurring supplier price lists, detecting purchase-cost changes, identifying added/removed SKUs, and surfacing margin risk before supplier updates reach selling prices.
+Supplier Price Watch is a procurement-intelligence CLI for comparing recurring supplier price lists, detecting purchase-cost changes, identifying added/removed products, and surfacing gross-margin risk before supplier updates reach selling prices.
 
-It is built for motorcycle-parts and e-commerce operations that need deterministic answers to five questions:
+It is built for motorcycle-parts and e-commerce operations that need deterministic answers to six questions:
 
-1. Which supplier SKUs became more expensive or cheaper?
-2. Which SKUs were added to or removed from a supplier list?
-3. Which rows can be compared safely without guessing product identity?
-4. Which supplier file schemas changed and therefore require an explicit import-profile update?
-5. Which matched SKUs now create `WARNING` or `CRITICAL` gross-margin risk against an explicit sales catalog?
+1. Which supplier products became more expensive or cheaper?
+2. Which products were added to or removed from a supplier list?
+3. Did a supplier change its SKU for an existing product?
+4. Which rows can be compared safely without guessing product identity?
+5. Which supplier file schemas changed and require an explicit import-profile update?
+6. Which matched products now create `WARNING` or `CRITICAL` gross-margin risk against the sales catalog?
 
-> Status: **v0.1.0 release candidate.** CSV/XLSX ingestion, versioned supplier profiles, Decimal-based comparison, added/removed SKU reporting, sales-catalog margin risk, regression tests, packaging checks, and GitHub Actions CI are implemented. Real supplier-specific profiles must still be derived from verified source-file schemas rather than guessed.
+> Status: **v0.1.0 release candidate.** CSV/XLSX ingestion, versioned supplier profiles, controlled supplier-SKU → canonical-SKU identity mapping, Decimal-based comparison, catalog-delta reporting, sales-catalog margin risk, regression tests, packaging checks, and GitHub Actions CI are implemented. Real supplier-specific profiles and identity aliases must be derived from verified source data rather than guessed.
 
 ## What works today
 
@@ -23,11 +24,14 @@ It is built for motorcycle-parts and e-commerce operations that need determinist
 - Strict JSON profile-registry loading with duplicate-key and unknown-field rejection
 - Profile-bound supplier identity when a source file has no supplier column
 - Fail-closed rejection when an embedded supplier conflicts with the selected profile
+- Controlled supplier SKU → canonical SKU aliases through `--identity-map`
+- Optional validated GTIN-8/12/13/14 metadata in identity aliases
+- Duplicate alias, conflicting barcode, invalid GTIN, and post-alias duplicate-identity rejection
 - Duplicate-column, missing-column, malformed-row, invalid-price, and duplicate-identity rejection
 - `Decimal`-based purchase-price and gross-margin calculations
-- Exact `supplier + SKU + currency` catalog matching
-- Added/removed SKU detection between snapshots
-- Sales-catalog ingestion with currency-safe matching
+- Exact `supplier + canonical SKU + currency` comparison after optional identity normalization
+- Added/removed product detection between snapshots
+- Sales-catalog ingestion with currency-safe canonical-SKU matching
 - `OK`, `WARNING`, and `CRITICAL` margin-risk classification
 - Operational summary for price direction, catalog deltas, and margin-risk counts
 - CLI comparison for `.csv` and `.xlsx` snapshots
@@ -54,16 +58,19 @@ Compare two canonical supplier snapshots:
 supplier-price-watch previous.csv current.csv
 ```
 
-Use XLSX input and write a CSV report:
-
-```bash
-supplier-price-watch previous.xlsx current.xlsx --output report.csv
-```
-
-Add an explicit sales catalog to calculate gross-margin risk:
+Add a sales catalog and write the result:
 
 ```bash
 supplier-price-watch previous.xlsx current.xlsx \
+  --sales-catalog sales.csv \
+  --output report.csv
+```
+
+When supplier SKUs changed between snapshots, normalize them before comparison:
+
+```bash
+supplier-price-watch previous.csv current.csv \
+  --identity-map product-identities.json \
   --sales-catalog sales.csv \
   --output report.csv
 ```
@@ -76,55 +83,65 @@ supplier-price-watch previous.xlsx current.xlsx \
   --only-risk
 ```
 
-The CLI returns exit code `2` for invalid input/profile/catalog conditions instead of continuing with a guessed result.
+The CLI returns exit code `2` for invalid input, profile, identity-map, or catalog conditions instead of continuing with a guessed result.
 
 ## Reproducible synthetic demo
 
-The following demo uses only synthetic commercial data and exercises the full snapshot + catalog-delta + margin-risk path.
+This demo exercises SKU replacement, canonical matching, price-change detection, sales-catalog enrichment, and margin risk without exposing real commercial data.
 
 Create `previous.csv`:
 
 ```csv
 supplier,sku,unit_cost,currency
-Demo Supplier,TYRE-001,100.00,TRY
+Demo Supplier,OLD-TYRE-42,100.00,TRY
 Demo Supplier,BRAKE-002,200.00,TRY
-Demo Supplier,CHAIN-003,300.00,TRY
 ```
 
 Create `current.csv`:
 
 ```csv
 supplier,sku,unit_cost,currency
-Demo Supplier,TYRE-001,120.00,TRY
+Demo Supplier,NEW-TYRE-42,120.00,TRY
 Demo Supplier,BRAKE-002,180.00,TRY
-Demo Supplier,FILTER-004,90.00,TRY
 ```
 
-Create `sales.csv`:
+Create `product-identities.json`:
+
+```json
+[
+  {
+    "supplier": "Demo Supplier",
+    "source_sku": "OLD-TYRE-42",
+    "canonical_sku": "TYRE-42"
+  },
+  {
+    "supplier": "Demo Supplier",
+    "source_sku": "NEW-TYRE-42",
+    "canonical_sku": "TYRE-42"
+  }
+]
+```
+
+Create `sales.csv` using the canonical SKU:
 
 ```csv
 sku,sale_price,currency
-TYRE-001,130.00,TRY
+TYRE-42,130.00,TRY
 BRAKE-002,300.00,TRY
-FILTER-004,150.00,TRY
 ```
 
 Run:
 
 ```bash
 supplier-price-watch previous.csv current.csv \
+  --identity-map product-identities.json \
   --sales-catalog sales.csv \
   --output report.csv
 ```
 
-This scenario is intentionally chosen to produce all three operational signal types:
+The two supplier-specific tyre SKUs are normalized to `TYRE-42` before comparison. The result is therefore one matched product with a real cost increase and margin-risk calculation, not a false `removed` + `added` pair. `BRAKE-002` remains an exact match and requires no alias.
 
-- `TYRE-001`: matched SKU with a purchase-cost increase and low gross margin, therefore a margin-risk signal
-- `BRAKE-002`: matched SKU with a purchase-cost decrease and healthy margin
-- `CHAIN-003`: `removed` from the current supplier snapshot
-- `FILTER-004`: `added` in the current supplier snapshot
-
-The command also writes `report.csv`, so the same deterministic output can be inspected or passed to a downstream spreadsheet/reporting step. No supplier identity, currency conversion, or product alias is inferred during this demo.
+No fuzzy name matching, currency conversion, barcode guess, or automatic alias creation occurs.
 
 ## Canonical supplier format
 
@@ -138,13 +155,48 @@ Supplier B,BTZ10S,1120.00,TRY
 
 The same canonical field names can be used in XLSX workbooks.
 
-A supplier-quote identity is:
+Without an identity map, a supplier quote identity is:
 
 ```text
-supplier + SKU + currency
+supplier + supplier SKU + currency
 ```
 
-Rows outside that exact identity are never silently paired.
+With an identity map, the SKU is first normalized and comparison uses:
+
+```text
+supplier + canonical SKU + currency
+```
+
+Rows outside that deterministic identity are never silently paired.
+
+## Product identity map
+
+Use `--identity-map` only for product identities that have been verified from a trustworthy source such as supplier master data, an internal SKU cross-reference, or a validated barcode mapping.
+
+The file is a strict JSON array:
+
+```json
+[
+  {
+    "supplier": "Supplier A",
+    "source_sku": "A-OLD-100",
+    "canonical_sku": "BRAKE-PAD-100",
+    "barcode": "4006381333931"
+  }
+]
+```
+
+Required fields:
+
+- `supplier`: supplier identity used in the price-list row
+- `source_sku`: SKU exactly as supplied by that supplier
+- `canonical_sku`: stable SKU used for comparison and sales-catalog lookup
+
+Optional `barcode` values must be valid GTIN-8, GTIN-12, GTIN-13, or GTIN-14 values including a valid check digit. A barcode is supporting identity metadata; the CLI does not infer aliases from barcodes automatically.
+
+The registry is deliberately fail-closed. It rejects unknown JSON fields, duplicate JSON keys, duplicate supplier/SKU aliases, one barcode mapped to conflicting canonical SKUs, invalid GTINs, and aliases that collapse multiple rows into the same `supplier + canonical SKU + currency` identity.
+
+Unmapped SKUs remain unchanged. This lets a file contain a mix of stable supplier SKUs and a small reviewed alias set without forcing unnecessary mappings.
 
 ## Sales catalog format
 
@@ -152,11 +204,11 @@ The optional sales catalog is intentionally explicit:
 
 ```csv
 sku,sale_price,currency
-8690001,169.90,TRY
+BRAKE-PAD-100,169.90,TRY
 BTZ10S,1499.00,TRY
 ```
 
-Sales prices are matched currency-safely. A TRY supplier quote is never enriched with a USD selling price, and ambiguous multi-currency matches fail closed.
+When `--identity-map` is used, the sales catalog should use canonical SKUs. Sales prices are matched currency-safely. A TRY supplier quote is never enriched with a USD selling price, and ambiguous multi-currency matches fail closed.
 
 When a sale price is available, gross margin is calculated as:
 
@@ -199,17 +251,11 @@ Use it from the CLI:
 ```bash
 supplier-price-watch old.xlsx new.xlsx \
   --profile-config supplier-profiles.json \
-  --profile-id supplier-a
-```
-
-Omit `--profile-version` to select the latest configured version, or pin one explicitly:
-
-```bash
-supplier-price-watch old.xlsx new.xlsx \
-  --profile-config supplier-profiles.json \
   --profile-id supplier-a \
-  --profile-version 1
+  --identity-map product-identities.json
 ```
+
+Omit `--profile-version` to select the latest configured version, or pin one explicitly with `--profile-version 1`.
 
 Profiles are intentionally strict. Unknown JSON fields, duplicate JSON keys, invalid versions, duplicate profile/version pairs, unsupported canonical targets, missing mapped source columns, and supplier-identity mismatches fail closed.
 
@@ -246,15 +292,9 @@ print(result.risk.value)
 
 ## Matching policy
 
-The matching layer is deliberately conservative:
+The matching layer is deliberately conservative. Supplier SKU normalization happens only when an explicit trusted alias exists. Unmatched rows are reported as `added` or `removed`; they are not guessed from product descriptions.
 
-```text
-supplier + SKU + currency
-```
-
-Unmatched rows are reported as `added` or `removed`; they are not guessed from product descriptions. This prevents unrelated parts from being paired because their text happens to look similar.
-
-A future identity layer may add controlled barcode/EAN and explicit SKU aliases. Fuzzy name matching, if introduced later, must remain review-only and must never silently create a purchasing match.
+Fuzzy name matching is intentionally unsupported for purchasing identity. If a future review-assistance layer proposes possible matches, it must remain non-authoritative until a human verifies and records the alias.
 
 ## Tests and CI
 
@@ -264,20 +304,21 @@ Run the deterministic suite locally with:
 python -m unittest discover -s tests -v
 ```
 
-The suite covers financial-domain rules, CSV/XLSX ingestion, supplier-profile behavior, strict JSON profile loading, supplierless imports, version resolution, catalog deltas, currency preservation, sales-catalog matching, margin-risk reporting, and CLI workflows.
+The suite covers financial-domain rules, CSV/XLSX ingestion, supplier-profile behavior, strict JSON loading, supplierless imports, version resolution, controlled product identity aliases, GTIN validation, post-alias collision rejection, catalog deltas, currency preservation, sales-catalog matching, margin-risk reporting, and CLI workflows including SKU replacement across snapshots.
 
 GitHub Actions runs on Python 3.11 and 3.13 for pushes to `main` and pull requests. The release gate also performs dependency validation, installed-CLI smoke testing, and wheel/source-distribution builds.
 
 ## Security and commercial-data handling
 
-Real supplier price lists can contain commercially sensitive information.
+Real supplier price lists and identity mappings can contain commercially sensitive information.
 
 - Do not commit production supplier price lists.
+- Do not commit confidential SKU cross-reference files unless they are explicitly safe for publication.
 - Do not commit supplier credentials, API keys, customer data, or private commercial terms.
 - Fixtures and documentation examples must use synthetic data unless redistribution is explicitly permitted.
 - Raw supplier files should remain immutable inputs; normalized records should be derived from them.
 - Ambiguous product identities must fail closed and be surfaced for manual review.
-- Supplier profiles must be derived from verified source-file schemas; do not invent production mappings from memory.
+- Supplier profiles and identity aliases must come from verified source data; do not invent production mappings from memory.
 - Currency conversion is deliberately outside the comparison engine; different currencies are never treated as equivalent without an explicit external conversion step.
 
 See [SECURITY.md](SECURITY.md) for the project security policy and [CHANGELOG.md](CHANGELOG.md) for release notes.
@@ -287,16 +328,16 @@ See [SECURITY.md](SECURITY.md) for the project security policy and [CHANGELOG.md
 The next high-value milestones are:
 
 1. Add verified supplier-profile fixtures derived from real file headers, using synthetic row values
-2. Add barcode/EAN and controlled SKU-alias identity mapping
-3. Add purchasing-focused XLSX output with explicit review status
+2. Add purchasing-focused XLSX output with explicit review status
+3. Add an identity-review workflow for unresolved supplier SKU changes without auto-matching them
 4. Add optional supplier/API adapters only where authentication and source contracts are well defined
 5. Add a web UI or persistent database only if the CLI workflow proves that they are genuinely needed
 
 ## Release scope
 
-The `0.1.0` release scope is deliberately narrow: deterministic supplier snapshot comparison, catalog-delta reporting, explicit sales-catalog margin risk, strict import profiles, local CLI operation, and regression-tested fail-closed behavior.
+The `0.1.0` release scope is deliberately narrow: deterministic supplier snapshot comparison, catalog-delta reporting, controlled product identity aliases, explicit sales-catalog margin risk, strict import profiles, local CLI operation, and regression-tested fail-closed behavior.
 
-It does **not** claim live supplier integrations, automatic FX conversion, fuzzy product identity, hosted dashboards, or production supplier-profile mappings that have not been verified from source files.
+It does **not** claim live supplier integrations, automatic FX conversion, fuzzy product identity, hosted dashboards, or production supplier-profile/identity mappings that have not been verified from source data.
 
 ## License
 
