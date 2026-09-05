@@ -90,8 +90,8 @@ class CliIdentityMapTests(unittest.TestCase):
         self.assertEqual(row["supplier"], "Arzu")
         self.assertEqual(row["sku"], "PCX-ARKA-BALATA-01")
         self.assertEqual(row["currency"], "TRY")
-        self.assertEqual(row["previous_cost"], "90")
-        self.assertEqual(row["current_cost"], "95")
+        self.assertEqual(row["previous_cost"], "90.00")
+        self.assertEqual(row["current_cost"], "95.00")
         self.assertEqual(row["gross_margin_percent"], "5.00")
         self.assertEqual(row["risk"], "critical")
 
