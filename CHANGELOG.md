@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+
+- Controlled product identity registry for mapping supplier-specific SKUs to canonical SKUs before comparison and margin analysis.
+- Optional GTIN/EAN metadata with check-digit validation and collision detection.
+- CLI `--identity-map` support so supplier SKU renames can still be treated as the same product instead of false added/removed rows.
+- Runnable product identity-map example covering supplier aliases, canonical SKUs, and optional GTIN usage.
+- End-to-end regression coverage proving identity-mapped supplier SKU changes still resolve the correct sales-catalog margin risk.
+
+### Changed
+
+- CSV report writes are now atomic so a failed replacement does not destroy an existing report.
+- Product identity handling remains fail-closed: duplicate aliases, conflicting canonical identities, invalid GTINs, unknown JSON fields, and duplicate JSON keys are rejected instead of guessed or silently overwritten.
+
 ## [0.1.0] - 2026-08-25
 
 ### Added
