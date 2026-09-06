@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-06
+
 ### Added
 
 - Controlled product identity registry for mapping supplier-specific SKUs to canonical SKUs before comparison and margin analysis.
@@ -18,6 +20,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - CSV report writes are now atomic so a failed replacement does not destroy an existing report.
 - Product identity handling remains fail-closed: duplicate aliases, conflicting canonical identities, invalid GTINs, unknown JSON fields, and duplicate JSON keys are rejected instead of guessed or silently overwritten.
+- CI now validates built wheel and source distributions with strict Twine metadata checks before release work proceeds.
 
 ## [0.1.0] - 2026-08-25
 
