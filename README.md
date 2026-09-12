@@ -11,7 +11,7 @@ It is built for motorcycle-parts and e-commerce operations that need determinist
 5. Which supplier file schemas changed and require an explicit import-profile update?
 6. Which matched products now create `WARNING` or `CRITICAL` gross-margin risk against the sales catalog?
 
-> Status: **v0.1.0 release candidate.** CSV/XLSX ingestion, versioned supplier profiles, controlled supplier-SKU → canonical-SKU identity mapping, Decimal-based comparison, catalog-delta reporting, sales-catalog margin risk, regression tests, packaging checks, and GitHub Actions CI are implemented. Real supplier-specific profiles and identity aliases must be derived from verified source data rather than guessed.
+> Status: **v0.2.0 codebase; GitHub release/tag pending.** CSV/XLSX ingestion, versioned supplier profiles, controlled supplier-SKU → canonical-SKU identity mapping with optional validated GTIN metadata, Decimal-based comparison, catalog-delta reporting, sales-catalog margin risk, regression tests, packaging checks, and GitHub Actions CI are implemented. Real supplier-specific profiles and identity aliases must be derived from verified source data rather than guessed.
 
 ## What works today
 
@@ -335,7 +335,7 @@ The next high-value milestones are:
 
 ## Release scope
 
-The `0.1.0` release scope is deliberately narrow: deterministic supplier snapshot comparison, catalog-delta reporting, controlled product identity aliases, explicit sales-catalog margin risk, strict import profiles, local CLI operation, and regression-tested fail-closed behavior.
+The `0.2.0` codebase is deliberately scoped: deterministic supplier snapshot comparison, catalog-delta reporting, controlled product identity aliases with validated GTIN metadata, explicit sales-catalog margin risk, strict import profiles, local CLI operation, and regression-tested fail-closed behavior.
 
 It does **not** claim live supplier integrations, automatic FX conversion, fuzzy product identity, hosted dashboards, or production supplier-profile/identity mappings that have not been verified from source data.
 
