@@ -20,6 +20,7 @@ Issues = "https://github.com/enesakn16/supplier-price-watch/issues"
 
 [project.scripts]
 supplier-price-watch = "supplier_price_watch_cli:main"
+supplier-price-watch-xlsx = "purchasing_report:main"
 
 [tool.setuptools]
 py-modules = [
@@ -28,4 +29,5 @@ py-modules = [
   "supplier_profile_config",
   "sales_catalog",
   "product_identity",
+  "purchasing_report",
 ]
