@@ -11,7 +11,7 @@ It is built for motorcycle-parts and e-commerce operations that need determinist
 5. Which supplier file schemas changed and require an explicit import-profile update?
 6. Which matched products now create `WARNING` or `CRITICAL` gross-margin risk against the sales catalog?
 
-> Status: **v0.2.0 codebase; GitHub release/tag pending.** CSV/XLSX ingestion, versioned supplier profiles, controlled supplier-SKU → canonical-SKU identity mapping with optional validated GTIN metadata, Decimal-based comparison, catalog-delta reporting, sales-catalog margin risk, regression tests, packaging checks, and GitHub Actions CI are implemented. Real supplier-specific profiles and identity aliases must be derived from verified source data rather than guessed.
+> Status: **v0.2.0 codebase; GitHub release/tag pending.** CSV/XLSX ingestion, versioned supplier profiles, controlled supplier-SKU → canonical-SKU identity mapping with optional validated GTIN metadata, Decimal-based comparison, catalog-delta reporting, sales-catalog margin risk, purchasing-focused XLSX export, regression tests, packaging checks, and GitHub Actions CI are implemented. Real supplier-specific profiles and identity aliases must be derived from verified source data rather than guessed.
 
 ## What works today
 
@@ -36,8 +36,9 @@ It is built for motorcycle-parts and e-commerce operations that need determinist
 - Operational summary for price direction, catalog deltas, and margin-risk counts
 - CLI comparison for `.csv` and `.xlsx` snapshots
 - Optional UTF-8 CSV report export
+- Purchasing-focused XLSX workbook export with summary metrics, risk-prioritized review rows, filtering, and frozen headers
 - `--only-risk` filtering when a sales catalog is supplied
-- Installable `supplier-price-watch` console command
+- Installable `supplier-price-watch` and `supplier-price-watch-xlsx` console commands
 - Unit/regression tests and GitHub Actions CI on Python 3.11 and 3.13
 
 ## Quick start
@@ -65,6 +66,14 @@ supplier-price-watch previous.xlsx current.xlsx \
   --sales-catalog sales.csv \
   --output report.csv
 ```
+
+Turn that canonical CSV report into a purchasing workbook:
+
+```bash
+supplier-price-watch-xlsx report.csv purchasing-review.xlsx
+```
+
+The workbook contains a `Summary` sheet and a filterable `Purchasing Review` sheet ordered by risk (`critical`, `warning`, `ok`) before supplier and SKU. The exporter rejects non-canonical report schemas instead of guessing column meanings.
 
 When supplier SKUs changed between snapshots, normalize them before comparison:
 
@@ -304,7 +313,7 @@ Run the deterministic suite locally with:
 python -m unittest discover -s tests -v
 ```
 
-The suite covers financial-domain rules, CSV/XLSX ingestion, supplier-profile behavior, strict JSON loading, supplierless imports, version resolution, controlled product identity aliases, GTIN validation, post-alias collision rejection, catalog deltas, currency preservation, sales-catalog matching, margin-risk reporting, and CLI workflows including SKU replacement across snapshots.
+The suite covers financial-domain rules, CSV/XLSX ingestion, supplier-profile behavior, strict JSON loading, supplierless imports, version resolution, controlled product identity aliases, GTIN validation, post-alias collision rejection, catalog deltas, currency preservation, sales-catalog matching, margin-risk reporting, CLI workflows including SKU replacement across snapshots, and purchasing-workbook export.
 
 GitHub Actions runs on Python 3.11 and 3.13 for pushes to `main` and pull requests. The release gate also performs dependency validation, installed-CLI smoke testing, and wheel/source-distribution builds.
 
@@ -328,14 +337,13 @@ See [SECURITY.md](SECURITY.md) for the project security policy and [CHANGELOG.md
 The next high-value milestones are:
 
 1. Add verified supplier-profile fixtures derived from real file headers, using synthetic row values
-2. Add purchasing-focused XLSX output with explicit review status
-3. Add an identity-review workflow for unresolved supplier SKU changes without auto-matching them
-4. Add optional supplier/API adapters only where authentication and source contracts are well defined
-5. Add a web UI or persistent database only if the CLI workflow proves that they are genuinely needed
+2. Add an identity-review workflow for unresolved supplier SKU changes without auto-matching them
+3. Add optional supplier/API adapters only where authentication and source contracts are well defined
+4. Add a web UI or persistent database only if the CLI workflow proves that they are genuinely needed
 
 ## Release scope
 
-The `0.2.0` codebase is deliberately scoped: deterministic supplier snapshot comparison, catalog-delta reporting, controlled product identity aliases with validated GTIN metadata, explicit sales-catalog margin risk, strict import profiles, local CLI operation, and regression-tested fail-closed behavior.
+The `0.2.0` codebase is deliberately scoped: deterministic supplier snapshot comparison, catalog-delta reporting, controlled product identity aliases with validated GTIN metadata, explicit sales-catalog margin risk, strict import profiles, local CLI operation, purchasing-workbook export, and regression-tested fail-closed behavior.
 
 It does **not** claim live supplier integrations, automatic FX conversion, fuzzy product identity, hosted dashboards, or production supplier-profile/identity mappings that have not been verified from source data.
 
