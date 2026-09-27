@@ -4,23 +4,34 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
-## [Unreleased]
-
-## [0.2.0] - 2026-09-06
+## [Unreleased] - 0.2.0
 
 ### Added
 
 - Controlled product identity registry for mapping supplier-specific SKUs to canonical SKUs before comparison and margin analysis.
 - Optional GTIN/EAN metadata with check-digit validation and collision detection.
 - CLI `--identity-map` support so supplier SKU renames can still be treated as the same product instead of false added/removed rows.
-- Runnable product identity-map example covering supplier aliases, canonical SKUs, and optional GTIN usage.
+- Deterministic unresolved-SKU review through `ProductIdentityRegistry.unresolved_quotes()`.
+- Optional `--require-identity-alias` CLI enforcement and `require_alias=True` library behavior for controlled purchasing runs that must reject every unmapped supplier SKU.
+- Purchasing-focused XLSX export with summary metrics, risk-prioritized review rows, filtering, and frozen headers.
+- Installable `supplier-price-watch-xlsx` console command.
+- Runnable product identity-map example covering supplier aliases, canonical SKUs, optional GTIN usage, unresolved identity handling, and strict alias enforcement.
 - End-to-end regression coverage proving identity-mapped supplier SKU changes still resolve the correct sales-catalog margin risk.
+- Regression coverage for deterministic unresolved-SKU ordering, strict alias enforcement, XLSX workbook structure, risk ordering, and canonical report-schema validation.
 
 ### Changed
 
 - CSV report writes are now atomic so a failed replacement does not destroy an existing report.
-- Product identity handling remains fail-closed: duplicate aliases, conflicting canonical identities, invalid GTINs, unknown JSON fields, and duplicate JSON keys are rejected instead of guessed or silently overwritten.
-- CI now validates built wheel and source distributions with strict Twine metadata checks before release work proceeds.
+- Purchasing workbook writes are atomic so failed exports do not leave partial output files.
+- Product identity handling remains fail-closed: duplicate aliases, conflicting canonical identities, invalid GTINs, unknown JSON fields, duplicate JSON keys, post-alias collisions, and optionally unresolved aliases are rejected instead of guessed or silently overwritten.
+- CI validates built wheel and source distributions with strict Twine metadata checks before release work proceeds.
+
+### Known limitations
+
+- No live supplier API integration or automatic downloads; input files are user-provided snapshots.
+- No fuzzy SKU matching, automatic barcode matching, or automatic alias creation.
+- No built-in notification/alert delivery.
+- Real supplier-specific profiles and identity aliases should only be added from verified source data.
 
 ## [0.1.0] - 2026-08-25
 
