@@ -370,6 +370,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--require-identity-alias",
+        action="store_true",
+        help=(
+            "Fail closed when any supplier SKU is missing from --identity-map. "
+            "Use this for controlled purchasing runs where silent passthrough is unsafe."
+        ),
+    )
+    parser.add_argument(
         "--sales-catalog",
         type=Path,
         help=(
@@ -398,6 +406,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.only_risk and args.sales_catalog is None:
             raise PriceWatchError("--only-risk requires --sales-catalog")
+        if args.require_identity_alias and args.identity_map is None:
+            raise PriceWatchError("--require-identity-alias requires --identity-map")
 
         profile = _resolve_profile(args)
         previous = _load_quotes(args.previous, profile=profile)
@@ -405,8 +415,14 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.identity_map is not None:
             identity_registry = load_identity_registry_json(args.identity_map)
-            previous = identity_registry.canonicalize_quotes(previous)
-            current = identity_registry.canonicalize_quotes(current)
+            previous = identity_registry.canonicalize_quotes(
+                previous,
+                require_alias=args.require_identity_alias,
+            )
+            current = identity_registry.canonicalize_quotes(
+                current,
+                require_alias=args.require_identity_alias,
+            )
 
         matched_currencies = _matched_currency_lookup(previous, current)
 

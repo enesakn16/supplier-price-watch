@@ -27,6 +27,7 @@ It is built for motorcycle-parts and e-commerce operations that need determinist
 - Controlled supplier SKU → canonical SKU aliases through `--identity-map`
 - Optional validated GTIN-8/12/13/14 metadata in identity aliases
 - Duplicate alias, conflicting barcode, invalid GTIN, and post-alias duplicate-identity rejection
+- Deterministic unresolved-SKU review queue and optional fail-closed alias enforcement
 - Duplicate-column, missing-column, malformed-row, invalid-price, and duplicate-identity rejection
 - `Decimal`-based purchase-price and gross-margin calculations
 - Exact `supplier + canonical SKU + currency` comparison after optional identity normalization
@@ -151,6 +152,21 @@ supplier-price-watch previous.csv current.csv \
 The two supplier-specific tyre SKUs are normalized to `TYRE-42` before comparison. The result is therefore one matched product with a real cost increase and margin-risk calculation, not a false `removed` + `added` pair. `BRAKE-002` remains an exact match and requires no alias.
 
 No fuzzy name matching, currency conversion, barcode guess, or automatic alias creation occurs.
+
+For controlled purchasing runs, add `--require-identity-alias` so every supplier
+SKU must exist in the trusted map. An unresolved SKU then exits with code `2`
+before any report is written:
+
+```bash
+supplier-price-watch previous.csv current.csv \
+  --identity-map product-identities.json \
+  --require-identity-alias \
+  --output report.csv
+```
+
+Library users can inspect the deterministic review queue with
+`ProductIdentityRegistry.unresolved_quotes()` or pass `require_alias=True` to
+`canonicalize_quote()` / `canonicalize_quotes()`.
 
 ## Canonical supplier format
 
@@ -337,13 +353,12 @@ See [SECURITY.md](SECURITY.md) for the project security policy and [CHANGELOG.md
 The next high-value milestones are:
 
 1. Add verified supplier-profile fixtures derived from real file headers, using synthetic row values
-2. Add an identity-review workflow for unresolved supplier SKU changes without auto-matching them
-3. Add optional supplier/API adapters only where authentication and source contracts are well defined
-4. Add a web UI or persistent database only if the CLI workflow proves that they are genuinely needed
+2. Add optional supplier/API adapters only where authentication and source contracts are well defined
+3. Add a web UI or persistent database only if the CLI workflow proves that they are genuinely needed
 
 ## Release scope
 
-The `0.2.0` codebase is deliberately scoped: deterministic supplier snapshot comparison, catalog-delta reporting, controlled product identity aliases with validated GTIN metadata, explicit sales-catalog margin risk, strict import profiles, local CLI operation, purchasing-workbook export, and regression-tested fail-closed behavior.
+The `0.2.0` codebase is deliberately scoped: deterministic supplier snapshot comparison, catalog-delta reporting, controlled product identity aliases with validated GTIN metadata, unresolved-SKU review and strict alias enforcement, explicit sales-catalog margin risk, strict import profiles, local CLI operation, purchasing-workbook export, and regression-tested fail-closed behavior.
 
 It does **not** claim live supplier integrations, automatic FX conversion, fuzzy product identity, hosted dashboards, or production supplier-profile/identity mappings that have not been verified from source data.
 

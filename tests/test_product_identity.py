@@ -73,6 +73,33 @@ class ProductIdentityTests(unittest.TestCase):
         with self.assertRaisesRegex(PriceWatchError, "duplicate supplier/SKU/currency"):
             registry.canonicalize_quotes(quotes)
 
+    def test_unresolved_quotes_are_returned_in_deterministic_review_order(self) -> None:
+        registry = ProductIdentityRegistry(
+            [ProductIdentityAlias("Supplier A", "KNOWN", "CANONICAL")]
+        )
+        quotes = [
+            SupplierQuote("Supplier B", "SKU-2", Decimal("20.00"), "TRY"),
+            SupplierQuote("Supplier A", "KNOWN", Decimal("10.00"), "TRY"),
+            SupplierQuote("Supplier A", "SKU-1", Decimal("15.00"), "USD"),
+        ]
+
+        unresolved = registry.unresolved_quotes(quotes)
+
+        self.assertEqual(
+            [(quote.supplier, quote.sku) for quote in unresolved],
+            [("Supplier A", "SKU-1"), ("Supplier B", "SKU-2")],
+        )
+
+    def test_require_alias_rejects_unresolved_quote(self) -> None:
+        registry = ProductIdentityRegistry()
+        quote = SupplierQuote("Supplier A", "UNKNOWN", Decimal("10.00"), "TRY")
+
+        with self.assertRaisesRegex(
+            PriceWatchError,
+            "unresolved product identity: Supplier A/UNKNOWN",
+        ):
+            registry.canonicalize_quotes([quote], require_alias=True)
+
     def test_json_loader_rejects_unknown_fields_and_duplicate_keys(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

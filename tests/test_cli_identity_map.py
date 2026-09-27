@@ -95,6 +95,40 @@ class CliIdentityMapTests(unittest.TestCase):
         self.assertEqual(row["gross_margin_percent"], "5.00")
         self.assertEqual(row["risk"], "critical")
 
+    def test_require_identity_alias_fails_closed_without_writing_report(self) -> None:
+        previous = self.root / "previous.csv"
+        current = self.root / "current.csv"
+        identity_map = self.root / "identity-map.json"
+        report = self.root / "report.csv"
+
+        previous.write_text(
+            "supplier,sku,unit_cost,currency\nArzu,UNKNOWN,90,TRY\n",
+            encoding="utf-8",
+        )
+        current.write_text(
+            "supplier,sku,unit_cost,currency\nArzu,UNKNOWN,95,TRY\n",
+            encoding="utf-8",
+        )
+        identity_map.write_text("[]", encoding="utf-8")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    str(previous),
+                    str(current),
+                    "--identity-map",
+                    str(identity_map),
+                    "--require-identity-alias",
+                    "--output",
+                    str(report),
+                ]
+            )
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("unresolved product identity: Arzu/UNKNOWN", stderr.getvalue())
+        self.assertFalse(report.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

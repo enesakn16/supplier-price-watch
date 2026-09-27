@@ -110,9 +110,43 @@ class ProductIdentityRegistry:
     def resolve_barcode(self, barcode: str) -> str | None:
         return self._barcodes.get(_validate_gtin(barcode))
 
-    def canonicalize_quote(self, quote: SupplierQuote) -> SupplierQuote:
+    def unresolved_quotes(
+        self,
+        quotes: Iterable[SupplierQuote],
+    ) -> tuple[SupplierQuote, ...]:
+        """Return quotes without a trusted alias in deterministic review order."""
+
+        unresolved = [
+            quote
+            for quote in quotes
+            if self.resolve_supplier_sku(quote.supplier, quote.sku) is None
+        ]
+        return tuple(
+            sorted(
+                unresolved,
+                key=lambda quote: (
+                    quote.supplier.casefold(),
+                    quote.sku.casefold(),
+                    quote.currency.casefold(),
+                    quote.unit_cost,
+                ),
+            )
+        )
+
+    def canonicalize_quote(
+        self,
+        quote: SupplierQuote,
+        *,
+        require_alias: bool = False,
+    ) -> SupplierQuote:
         canonical_sku = self.resolve_supplier_sku(quote.supplier, quote.sku)
-        if canonical_sku is None or canonical_sku == quote.sku:
+        if canonical_sku is None:
+            if require_alias:
+                raise PriceWatchError(
+                    f"unresolved product identity: {quote.supplier}/{quote.sku}"
+                )
+            return quote
+        if canonical_sku == quote.sku:
             return quote
         return SupplierQuote(
             supplier=quote.supplier,
@@ -121,11 +155,16 @@ class ProductIdentityRegistry:
             currency=quote.currency,
         )
 
-    def canonicalize_quotes(self, quotes: Iterable[SupplierQuote]) -> list[SupplierQuote]:
+    def canonicalize_quotes(
+        self,
+        quotes: Iterable[SupplierQuote],
+        *,
+        require_alias: bool = False,
+    ) -> list[SupplierQuote]:
         result: list[SupplierQuote] = []
         seen: set[tuple[str, str, str]] = set()
         for quote in quotes:
-            canonical = self.canonicalize_quote(quote)
+            canonical = self.canonicalize_quote(quote, require_alias=require_alias)
             identity = (canonical.supplier, canonical.sku, canonical.currency)
             if identity in seen:
                 raise PriceWatchError(
