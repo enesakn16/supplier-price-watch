@@ -11,6 +11,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
+from supplier_price_watch import spreadsheet_safe_text
+
 
 REPORT_COLUMNS = (
     "status",
@@ -92,7 +94,14 @@ def write_purchasing_workbook(source_csv: Path, output_xlsx: Path) -> None:
             item["sku"].casefold(),
         ),
     ):
-        lines.append([row[column] for column in REPORT_COLUMNS])
+        lines.append(
+            [
+                spreadsheet_safe_text(row[column])
+                if column in {"supplier", "sku"}
+                else row[column]
+                for column in REPORT_COLUMNS
+            ]
+        )
     lines.freeze_panes = "A2"
     lines.auto_filter.ref = lines.dimensions
     for cell in lines[1]:

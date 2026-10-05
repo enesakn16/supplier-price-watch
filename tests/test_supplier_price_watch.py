@@ -13,7 +13,17 @@ from supplier_price_watch import (
     compare_quote,
     load_quotes_csv,
     load_quotes_xlsx,
+    spreadsheet_safe_text,
 )
+
+
+class SpreadsheetSafetyTests(unittest.TestCase):
+    def test_neutralizes_formula_leading_text(self):
+        for value in ("=SUM(1,1)", "+CMD", "-CMD", "@CMD", "\tCMD", "\rCMD"):
+            with self.subTest(value=value):
+                self.assertEqual(spreadsheet_safe_text(value), f"'{value}")
+
+        self.assertEqual(spreadsheet_safe_text("SKU-001"), "SKU-001")
 
 
 class SupplierQuoteTests(unittest.TestCase):

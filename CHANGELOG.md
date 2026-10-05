@@ -23,6 +23,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - CSV report writes are now atomic so a failed replacement does not destroy an existing report.
 - Purchasing workbook writes are atomic so failed exports do not leave partial output files.
+- CSV and XLSX exports neutralize formula-leading supplier/SKU text to prevent spreadsheet formula injection.
 - Product identity handling remains fail-closed: duplicate aliases, conflicting canonical identities, invalid GTINs, unknown JSON fields, duplicate JSON keys, post-alias collisions, and optionally unresolved aliases are rejected instead of guessed or silently overwritten.
 - CI validates built wheel and source distributions with strict Twine metadata checks before release work proceeds.
 

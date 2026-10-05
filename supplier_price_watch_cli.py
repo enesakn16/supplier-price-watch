@@ -22,6 +22,7 @@ from supplier_price_watch import (
     load_quotes_csv_profile,
     load_quotes_xlsx,
     load_quotes_xlsx_profile,
+    spreadsheet_safe_text,
 )
 from supplier_profile_config import load_profile_registry_json
 
@@ -281,8 +282,8 @@ def _write_csv(
                 writer.writerow(
                     [
                         "matched",
-                        item.supplier,
-                        item.sku,
+                        spreadsheet_safe_text(item.supplier),
+                        spreadsheet_safe_text(item.sku),
                         currency,
                         item.previous_cost,
                         item.current_cost,
@@ -296,8 +297,8 @@ def _write_csv(
                 writer.writerow(
                     [
                         "added",
-                        quote.supplier,
-                        quote.sku,
+                        spreadsheet_safe_text(quote.supplier),
+                        spreadsheet_safe_text(quote.sku),
                         quote.currency,
                         "",
                         quote.unit_cost,
@@ -311,8 +312,8 @@ def _write_csv(
                 writer.writerow(
                     [
                         "removed",
-                        quote.supplier,
-                        quote.sku,
+                        spreadsheet_safe_text(quote.supplier),
+                        spreadsheet_safe_text(quote.sku),
                         quote.currency,
                         quote.unit_cost,
                         "",

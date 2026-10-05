@@ -17,6 +17,7 @@ ZERO = Decimal("0")
 HUNDRED = Decimal("100")
 REQUIRED_CSV_COLUMNS = frozenset({"supplier", "sku", "unit_cost"})
 CANONICAL_CSV_COLUMNS = REQUIRED_CSV_COLUMNS | {"currency"}
+SPREADSHEET_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
 class PriceWatchError(ValueError):
@@ -27,6 +28,14 @@ class RiskLevel(str, Enum):
     OK = "ok"
     WARNING = "warning"
     CRITICAL = "critical"
+
+
+def spreadsheet_safe_text(value: str) -> str:
+    """Prevent user-controlled text from becoming a spreadsheet formula."""
+
+    if value.startswith(SPREADSHEET_FORMULA_PREFIXES):
+        return f"'{value}"
+    return value
 
 
 def _decimal(value: object, *, field: str) -> Decimal:

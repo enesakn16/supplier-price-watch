@@ -209,6 +209,32 @@ class SupplierPriceWatchCliProfileTests(unittest.TestCase):
         self.assertEqual(by_status["removed"]["previous_cost"], "50.00")
         self.assertEqual(by_status["removed"]["currency"], "TRY")
 
+    def test_csv_report_neutralizes_spreadsheet_formulas(self) -> None:
+        previous = self.root / "previous.csv"
+        current = self.root / "current.csv"
+        report = self.root / "report.csv"
+        previous.write_text(
+            "supplier,sku,unit_cost,currency\n"
+            "=MALICIOUS(),@DANGEROUS,100,TRY\n",
+            encoding="utf-8",
+        )
+        current.write_text(
+            "supplier,sku,unit_cost,currency\n"
+            "=MALICIOUS(),@DANGEROUS,110,TRY\n",
+            encoding="utf-8",
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            exit_code = main(
+                [str(previous), str(current), "--output", str(report)]
+            )
+
+        self.assertEqual(exit_code, 0)
+        with report.open("r", encoding="utf-8", newline="") as handle:
+            row = next(csv.DictReader(handle))
+        self.assertEqual(row["supplier"], "'=MALICIOUS()")
+        self.assertEqual(row["sku"], "'@DANGEROUS")
+
     def test_operational_summary_counts_price_direction_and_catalog_delta(self) -> None:
         previous = self.root / "previous.csv"
         current = self.root / "current.csv"

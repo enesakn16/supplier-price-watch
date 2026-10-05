@@ -46,6 +46,26 @@ class PurchasingReportTests(unittest.TestCase):
             with self.assertRaises(PurchasingReportError):
                 write_purchasing_workbook(source, Path(temp_dir) / "out.xlsx")
 
+    def test_neutralizes_formula_cells_in_workbook(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "report.csv"
+            output = root / "purchasing.xlsx"
+            source.write_text(
+                "status,supplier,sku,currency,previous_cost,current_cost,absolute_change,percent_change,gross_margin_percent,risk\n"
+                "matched,=MALICIOUS(),@DANGEROUS,TRY,100,110,10,10,,,\n",
+                encoding="utf-8",
+            )
+
+            write_purchasing_workbook(source, output)
+            workbook = load_workbook(output, data_only=False)
+            review = workbook["Purchasing Review"]
+
+            self.assertEqual(review["B2"].value, "'=MALICIOUS()")
+            self.assertEqual(review["C2"].value, "'@DANGEROUS")
+            self.assertEqual(review["B2"].data_type, "s")
+            self.assertEqual(review["C2"].data_type, "s")
+
 
 if __name__ == "__main__":
     unittest.main()
