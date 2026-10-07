@@ -53,7 +53,7 @@ class PurchasingReportTests(unittest.TestCase):
             output = root / "purchasing.xlsx"
             source.write_text(
                 "status,supplier,sku,currency,previous_cost,current_cost,absolute_change,percent_change,gross_margin_percent,risk\n"
-                "matched,=MALICIOUS(),@DANGEROUS,TRY,100,110,10,10,,,\n",
+                "=STATUS(),=MALICIOUS(),@DANGEROUS,+CURRENCY(),-100,@CURRENT(),=CHANGE(),+PERCENT(),-MARGIN(),=RISK()\n",
                 encoding="utf-8",
             )
 
@@ -61,10 +61,22 @@ class PurchasingReportTests(unittest.TestCase):
             workbook = load_workbook(output, data_only=False)
             review = workbook["Purchasing Review"]
 
-            self.assertEqual(review["B2"].value, "'=MALICIOUS()")
-            self.assertEqual(review["C2"].value, "'@DANGEROUS")
-            self.assertEqual(review["B2"].data_type, "s")
-            self.assertEqual(review["C2"].data_type, "s")
+            expected = (
+                "'=STATUS()",
+                "'=MALICIOUS()",
+                "'@DANGEROUS",
+                "'+CURRENCY()",
+                "'-100",
+                "'@CURRENT()",
+                "'=CHANGE()",
+                "'+PERCENT()",
+                "'-MARGIN()",
+                "'=RISK()",
+            )
+            for cell, value in zip(review[2], expected, strict=True):
+                with self.subTest(column=cell.column_letter):
+                    self.assertEqual(cell.value, value)
+                    self.assertEqual(cell.data_type, "s")
 
 
 if __name__ == "__main__":

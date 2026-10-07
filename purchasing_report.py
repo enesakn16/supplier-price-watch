@@ -94,14 +94,10 @@ def write_purchasing_workbook(source_csv: Path, output_xlsx: Path) -> None:
             item["sku"].casefold(),
         ),
     ):
-        lines.append(
-            [
-                spreadsheet_safe_text(row[column])
-                if column in {"supplier", "sku"}
-                else row[column]
-                for column in REPORT_COLUMNS
-            ]
-        )
+        # The standalone XLSX converter accepts canonical reports from outside
+        # the CLI, so every CSV cell is untrusted text here.  Neutralize all
+        # formula-leading values before openpyxl writes them to the workbook.
+        lines.append([spreadsheet_safe_text(row[column]) for column in REPORT_COLUMNS])
     lines.freeze_panes = "A2"
     lines.auto_filter.ref = lines.dimensions
     for cell in lines[1]:
