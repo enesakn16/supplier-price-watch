@@ -31,6 +31,35 @@ QuoteIdentity = tuple[str, str, str]
 MatchIdentity = tuple[str, str, Decimal, Decimal]
 
 
+def _ensure_output_does_not_overwrite_inputs(args: argparse.Namespace) -> None:
+    """Reject output paths that alias any source file, including links."""
+
+    if args.output is None:
+        return
+
+    for input_path in (
+        args.previous,
+        args.current,
+        args.sales_catalog,
+        args.profile_config,
+        args.identity_map,
+    ):
+        if input_path is None:
+            continue
+        try:
+            collides = args.output.resolve() == input_path.resolve()
+            if not collides and args.output.exists() and input_path.exists():
+                collides = os.path.samefile(args.output, input_path)
+        except (OSError, RuntimeError) as exc:
+            raise PriceWatchError(
+                f"cannot validate output path: {args.output}"
+            ) from exc
+        if collides:
+            raise PriceWatchError(
+                f"--output must not overwrite input file: {input_path}"
+            )
+
+
 def _load_quotes(
     path: Path,
     *,
@@ -409,6 +438,8 @@ def main(argv: list[str] | None = None) -> int:
             raise PriceWatchError("--only-risk requires --sales-catalog")
         if args.require_identity_alias and args.identity_map is None:
             raise PriceWatchError("--require-identity-alias requires --identity-map")
+
+        _ensure_output_does_not_overwrite_inputs(args)
 
         profile = _resolve_profile(args)
         previous = _load_quotes(args.previous, profile=profile)
