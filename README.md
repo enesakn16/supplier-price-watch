@@ -46,6 +46,8 @@ It is built for motorcycle-parts and e-commerce operations that need determinist
 
 Python 3.11+ is required.
 
+> **Output safety:** Never set `--output` to a supplier snapshot, sales catalog, profile configuration, or identity-map file, including a symlink or hardlink alias. Older revisions (including `main` before [the output-collision fix in PR #1](https://github.com/enesakn16/supplier-price-watch/pull/1)) can overwrite those source files with the generated CSV report. Write reports to a distinct destination and retain backups of original inputs.
+
 ```bash
 git clone https://github.com/enesakn16/supplier-price-watch.git
 cd supplier-price-watch
