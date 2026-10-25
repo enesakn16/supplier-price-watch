@@ -71,7 +71,24 @@ def _autofit(sheet) -> None:
         sheet.column_dimensions[get_column_letter(column_cells[0].column)].width = width
 
 
+def _ensure_workbook_output_is_not_source(source_csv: Path, output_xlsx: Path) -> None:
+    """Reject workbook output paths that alias the source report, including links."""
+    try:
+        collides = source_csv.resolve() == output_xlsx.resolve()
+        if not collides and source_csv.exists() and output_xlsx.exists():
+            collides = os.path.samefile(source_csv, output_xlsx)
+    except (OSError, RuntimeError) as exc:
+        raise PurchasingReportError(
+            f"cannot validate output workbook path: {output_xlsx}"
+        ) from exc
+    if collides:
+        raise PurchasingReportError(
+            f"output workbook must not overwrite source CSV: {source_csv}"
+        )
+
+
 def write_purchasing_workbook(source_csv: Path, output_xlsx: Path) -> None:
+    _ensure_workbook_output_is_not_source(source_csv, output_xlsx)
     rows = _read_rows(source_csv)
     workbook = Workbook()
     summary = workbook.active
@@ -115,6 +132,7 @@ def write_purchasing_workbook(source_csv: Path, output_xlsx: Path) -> None:
         ) as handle:
             temp_path = Path(handle.name)
         workbook.save(temp_path)
+        _ensure_workbook_output_is_not_source(source_csv, output_xlsx)
         os.replace(temp_path, output_xlsx)
         temp_path = None
     except OSError as exc:
