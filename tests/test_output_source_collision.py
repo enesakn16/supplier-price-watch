@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from supplier_price_watch_cli import main
 
@@ -70,6 +71,28 @@ class OutputSourceCollisionTests(unittest.TestCase):
         except (OSError, NotImplementedError) as exc:
             self.skipTest(f"hardlinks unavailable: {exc}")
         self.assert_rejected_unchanged(output, self.previous)
+
+    def test_rechecks_output_alias_before_atomic_replace(self) -> None:
+        # Simulate an output alias created after the initial CLI validation.
+        output = self.root / "late-alias.csv"
+        original_fsync = os.fsync
+        before = self.previous.read_bytes()
+
+        def inject_symlink(fd: int) -> None:
+            original_fsync(fd)
+            output.symlink_to(self.previous)
+
+        try:
+            with patch("supplier_price_watch_cli.os.fsync", side_effect=inject_symlink):
+                status, stderr = self.run_cli("--output", str(output))
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlinks unavailable: {exc}")
+
+        self.assertEqual(status, 2)
+        self.assertIn("--output must not overwrite input file", stderr)
+        self.assertEqual(self.previous.read_bytes(), before)
+        self.assertTrue(output.is_symlink())
+        self.assertEqual(list(self.root.glob(".late-alias.csv.*.tmp")), [])
 
     def test_distinct_report_still_succeeds(self) -> None:
         output = self.root / "report.csv"

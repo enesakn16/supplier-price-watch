@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
-from typing import Iterable, Mapping
+from typing import Callable, Iterable, Mapping
 
 from product_identity import load_identity_registry_json
 from sales_catalog import load_sales_catalog_csv, sale_price_mapping_for_quotes
@@ -267,6 +267,7 @@ def _write_csv(
     added: list[SupplierQuote],
     removed: list[SupplierQuote],
     matched_currencies: Mapping[MatchIdentity, str],
+    validate_output: Callable[[], None] | None = None,
 ) -> None:
     temp_path: Path | None = None
     try:
@@ -354,6 +355,8 @@ def _write_csv(
                 )
             handle.flush()
             os.fsync(handle.fileno())
+        if validate_output is not None:
+            validate_output()
         os.replace(temp_path, path)
         temp_path = None
     except PriceWatchError:
@@ -486,6 +489,7 @@ def main(argv: list[str] | None = None) -> int:
                 added=added,
                 removed=removed,
                 matched_currencies=matched_currencies,
+                validate_output=lambda: _ensure_output_does_not_overwrite_inputs(args),
             )
             print(f"Report written: {args.output}")
         return 0
