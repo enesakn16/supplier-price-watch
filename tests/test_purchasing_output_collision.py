@@ -4,8 +4,9 @@ import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 from purchasing_report import PurchasingReportError, write_purchasing_workbook
 
@@ -47,6 +48,32 @@ class WorkbookOutputCollisionTests(unittest.TestCase):
         except (OSError, NotImplementedError) as exc:
             self.skipTest(f"hardlinks unavailable: {exc}")
         self.assert_safe_rejection(alias)
+
+    def test_rechecks_late_symlink_before_replace(self) -> None:
+        # Simulate another process creating an alias while the workbook is built.
+        output = self.root / "late-alias.xlsx"
+        probe = self.root / "symlink-probe"
+        try:
+            probe.symlink_to(self.source)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlinks unavailable: {exc}")
+        else:
+            probe.unlink()
+
+        before = self.source.read_bytes()
+        original_save = Workbook.save
+
+        def save_and_create_alias(workbook: Workbook, filename: str | Path) -> None:
+            original_save(workbook, filename)
+            output.symlink_to(self.source)
+
+        with patch("purchasing_report.Workbook.save", new=save_and_create_alias):
+            with self.assertRaisesRegex(PurchasingReportError, "must not overwrite source CSV"):
+                write_purchasing_workbook(self.source, output)
+
+        self.assertEqual(self.source.read_bytes(), before)
+        self.assertTrue(output.is_symlink())
+        self.assertEqual(list(self.root.glob(f".{output.name}.*.xlsx")), [])
 
     def test_distinct_existing_workbook_can_be_replaced(self) -> None:
         output = self.root / "purchasing.xlsx"
