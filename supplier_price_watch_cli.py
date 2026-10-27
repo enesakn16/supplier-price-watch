@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
-from typing import Iterable, Mapping
+from typing import Callable, Iterable, Mapping
 
 from product_identity import load_identity_registry_json
 from sales_catalog import load_sales_catalog_csv, sale_price_mapping_for_quotes
@@ -29,6 +29,35 @@ from supplier_profile_config import load_profile_registry_json
 
 QuoteIdentity = tuple[str, str, str]
 MatchIdentity = tuple[str, str, Decimal, Decimal]
+
+
+def _ensure_output_does_not_overwrite_inputs(args: argparse.Namespace) -> None:
+    """Reject output paths that alias any source file, including links."""
+
+    if args.output is None:
+        return
+
+    for input_path in (
+        args.previous,
+        args.current,
+        args.sales_catalog,
+        args.profile_config,
+        args.identity_map,
+    ):
+        if input_path is None:
+            continue
+        try:
+            collides = args.output.resolve() == input_path.resolve()
+            if not collides and args.output.exists() and input_path.exists():
+                collides = os.path.samefile(args.output, input_path)
+        except (OSError, RuntimeError) as exc:
+            raise PriceWatchError(
+                f"cannot validate output path: {args.output}"
+            ) from exc
+        if collides:
+            raise PriceWatchError(
+                f"--output must not overwrite input file: {input_path}"
+            )
 
 
 def _load_quotes(
@@ -238,6 +267,7 @@ def _write_csv(
     added: list[SupplierQuote],
     removed: list[SupplierQuote],
     matched_currencies: Mapping[MatchIdentity, str],
+    validate_output: Callable[[], None] | None = None,
 ) -> None:
     temp_path: Path | None = None
     try:
@@ -325,6 +355,8 @@ def _write_csv(
                 )
             handle.flush()
             os.fsync(handle.fileno())
+        if validate_output is not None:
+            validate_output()
         os.replace(temp_path, path)
         temp_path = None
     except PriceWatchError:
@@ -410,6 +442,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.require_identity_alias and args.identity_map is None:
             raise PriceWatchError("--require-identity-alias requires --identity-map")
 
+        _ensure_output_does_not_overwrite_inputs(args)
+
         profile = _resolve_profile(args)
         previous = _load_quotes(args.previous, profile=profile)
         current = _load_quotes(args.current, profile=profile)
@@ -455,6 +489,7 @@ def main(argv: list[str] | None = None) -> int:
                 added=added,
                 removed=removed,
                 matched_currencies=matched_currencies,
+                validate_output=lambda: _ensure_output_does_not_overwrite_inputs(args),
             )
             print(f"Report written: {args.output}")
         return 0
